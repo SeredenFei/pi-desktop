@@ -47,6 +47,7 @@ import { initAttachmentStore, findAttachment } from "./attachment-store.js";
 import { isOfficeFile, OFFICE_MAX_FILE_BYTES, unzipFiles } from "./office-parse.js";
 import { startControlServer } from "./control-socket.js";
 import { wireDesktopIpc } from "./desktop-ipc.js";
+import { collectDescendants, listProcesses, sweepSurvivors } from "./process-tree.js";
 import { scheduleUploadCleanup } from "./uploads.js";
 import { ensureWindowsBash, windowsBashDir } from "./ensure-bash.js";
 import { listThemes, readThemeCss, resolveThemeFile } from "./themes.js";
@@ -4165,6 +4166,13 @@ wireDesktopIpc({
 	activeConversations: () => service.activeConversations(),
 	shutdown: () => void shutdown("SIGTERM"),
 	isShuttingDown: () => shuttingDown,
+	prepareOrphanSweep: async () => {
+		const pids = collectDescendants(await listProcesses(process.platform), process.pid);
+		process.once("exit", () => {
+			const swept = sweepSurvivors(pids);
+			if (swept.length) console.log(`[desktop-ipc] 扫尾清理残留进程：${swept.join(", ")}`);
+		});
+	},
 });
 process.on("unhandledRejection", (reason: unknown) => {
 	console.error("[pi-web-ui] Unhandled Promise Rejection:", reason);

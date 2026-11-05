@@ -18,6 +18,12 @@ export interface DesktopIpcDeps {
 	shutdown: () => void;
 	/** Whether a shutdown is already running. */
 	isShuttingDown: () => boolean;
+	/**
+	 * Called on parent disconnect BEFORE shutdown: snapshot descendants and arrange
+	 * for survivors to be killed on exit (the desktop shell, which normally does
+	 * this, is gone). Failures must not block the shutdown.
+	 */
+	prepareOrphanSweep?: () => Promise<void>;
 }
 
 /** Minimal slice of `process` we need — injectable for unit tests. */
@@ -52,7 +58,19 @@ export function wireDesktopIpc(deps: DesktopIpcDeps, proc: DesktopIpcProcess = p
 	proc.on("disconnect", () => {
 		if (deps.isShuttingDown()) return;
 		console.log("[desktop-ipc] 桌面壳已断开，server 自行退出");
-		deps.shutdown();
+		const go = () => {
+			if (!deps.isShuttingDown()) deps.shutdown();
+		};
+		if (!deps.prepareOrphanSweep) return go();
+		// 快照最多等 5s：拿不到也要照常退出
+		const timer = setTimeout(go, 5000);
+		deps
+			.prepareOrphanSweep()
+			.catch(() => {})
+			.finally(() => {
+				clearTimeout(timer);
+				go();
+			});
 	});
 	return true;
 }

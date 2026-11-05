@@ -1,0 +1,80 @@
+name: Desktop CI
+
+# 桌面壳三平台硬门槛（redesign P1，docs/redesign-plan.md「交付与验收」）：
+#   - 构建 server + web + desktop shell；
+#   - 桌面相关单测；
+#   - 退出测试（tests/desktop-exit-test.mjs）：开 2 个终端 + 一个脱离终端的后台哨兵进程，
+#     分别以「点 ✕ / SIGTERM / 强杀主进程」退出，断言进程树零残留。
+# 只在桌面壳 / server 进程模型相关改动时触发，避免拖慢纯前端 PR。
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "server/index.ts"
+      - "server/desktop-ipc.ts"
+      - "server/process-tree.ts"
+      - "server/terminals.ts"
+      - "web/src/desktop.ts"
+      - "web/src/components/DesktopQuitConfirm.tsx"
+      - "tests/desktop-exit-test.mjs"
+      - "tests/unit/desktop-*.test.ts"
+      - "tests/unit/process-tree-parity.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop-ci.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PI_WEB_PLUGIN_CATALOG_URL: ""
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (web + server)
+        run: npm run build
+
+      - name: Build desktop shell
+        run: npm run build:desktop
+
+      - name: Desktop unit tests
+        run: npx vitest run tests/unit/desktop-ipc.test.ts tests/unit/desktop-quit.test.ts tests/unit/process-tree-parity.test.ts tests/unit/desktop-startup.test.ts
+
+      # Linux runner 无显示：xvfb 提供虚拟 X server；Electron 需要的系统库 ubuntu-latest 已自带大部分，
+      # 补齐 GTK/NSS 等以防镜像变动。
+      - name: Install Linux display deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 || \
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0 libnss3 libgbm1 libasound2
+
+      - name: Desktop exit test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/desktop-exit-test.mjs
+
+      - name: Desktop exit test (Windows / macOS)
+        if: runner.os != 'Linux'
+        run: node tests/desktop-exit-test.mjs

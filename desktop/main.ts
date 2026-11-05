@@ -166,6 +166,12 @@ async function startServerSidecar(): Promise<string> {
 			},
 			stdio: ["inherit", "inherit", "inherit", "ipc"],
 			windowsHide: true,
+			// Windows：libuv 把非 detached 子进程放进「父死即杀」的 Job（且允许孙进程静默脱离）。
+			// 桌面壳崩溃时 server 会被内核瞬杀、来不及扫尾，而脱离 Job 的孙进程活了下来。
+			// detached 让 server 不入该 Job：崩溃后它仍能收到 IPC 断开、快照并清理自己的整棵树
+			// （server/desktop-ipc.ts）。Electron 是 GUI 子系统，server 本就没有控制台，detached
+			// 不改变其子进程的窗口行为。POSIX 子进程本就不随父进程死，无需 detached。
+			detached: process.platform === "win32",
 		},
 	);
 	let earlyExitError: Error | null = null;
@@ -370,6 +376,11 @@ async function shutdownServerForQuit(): Promise<void> {
 
 async function requestQuit(opts: { skipConfirm?: boolean } = {}): Promise<void> {
 	if (quitPhase === "confirming") {
+		if (opts.skipConfirm) {
+			// 系统信号等不可拒绝的退出：替用户点“退出”，让正在等待的 requestQuit 继续走完
+			resolvePendingQuitConfirm(true);
+			return;
+		}
 		// 确认框已在：再点 ✕ 只是把窗口拉到前台
 		if (mainWin && !mainWin.isDestroyed()) mainWin.focus();
 		return;
@@ -409,6 +420,12 @@ ipcMain.handle("pi-desktop:quit-decision", (event, payload: unknown) => {
 	return true;
 });
 
+// POSIX 信号（注销 / systemd / kill）：无法与用户交互，跳过确认直接走优雅关闭 + 树杀兜底。
+if (process.platform !== "win32") {
+	for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+		process.on(sig, () => void requestQuit({ skipConfirm: true }));
+	}
+}
 app.on("before-quit", (e) => {
 	// Cmd+Q / 菜单 Quit / Dock 退出 / 系统注销：同样走确认 + 优雅关闭
 	if (quitPhase === "done") return;

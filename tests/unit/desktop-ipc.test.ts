@@ -90,3 +90,35 @@ describe("wireDesktopIpc", () => {
 		expect(d.shutdown).not.toHaveBeenCalled();
 	});
 });
+
+describe("wireDesktopIpc orphan sweep", () => {
+	it("runs prepareOrphanSweep before shutdown on disconnect", async () => {
+		const { proc, em } = fakeProc({ PI_WEB_DESKTOP_IPC: "1" });
+		const order: string[] = [];
+		const d = deps();
+		d.shutdown.mockImplementation(() => order.push("shutdown"));
+		wireDesktopIpc(
+			{
+				...d,
+				prepareOrphanSweep: async () => {
+					await new Promise((r) => setTimeout(r, 5));
+					order.push("prepare");
+				},
+			},
+			proc,
+		);
+		em.emit("disconnect");
+		expect(order).toEqual([]);
+		await new Promise((r) => setTimeout(r, 30));
+		expect(order).toEqual(["prepare", "shutdown"]);
+	});
+
+	it("still shuts down when prepareOrphanSweep rejects", async () => {
+		const { proc, em } = fakeProc({ PI_WEB_DESKTOP_IPC: "1" });
+		const d = deps();
+		wireDesktopIpc({ ...d, prepareOrphanSweep: () => Promise.reject(new Error("ps failed")) }, proc);
+		em.emit("disconnect");
+		await new Promise((r) => setTimeout(r, 10));
+		expect(d.shutdown).toHaveBeenCalledTimes(1);
+	});
+});

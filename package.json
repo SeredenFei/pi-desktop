@@ -84,6 +84,7 @@
 		"release:notes": "node scripts/release-notes.mjs",
 		"changelog:i18n": "node scripts/release-notes.mjs --unreleased",
 		"test:freeze": "node tests/freeze-test.mjs",
+		"test:desktop-exit": "node tests/desktop-exit-test.mjs",
 		"plugins:link": "node scripts/link-plugins.mjs",
 		"plugins:unlink": "node scripts/link-plugins.mjs --unlink",
 		"start": "node --import ./dist/server/resolve-global-sdk.js dist/server/index.js",
