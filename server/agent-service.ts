@@ -6407,6 +6407,14 @@ export class ClientSession {
 				if (mm.stopReason !== "error") conv.retryState = null;
 				const text = extractAssistantTextFromContent(mm.content);
 				if (text && text.includes("[[")) void this.markerSvc.handleAssistantText(conv.id, text);
+				// 若当前处于 Chat 模式（独立对话或 Chat Project），助手消息落盘后自动打包进跨端记忆文档并触发防抖同步
+				setTimeout(() => {
+					try {
+						getMemoryStore(this.stateStore?.dataDir)?.captureChatTranscriptsFromDisk(true);
+					} catch {
+						/* ignore */
+					}
+				}, 400);
 				break;
 			}
 			case "agent_start": {

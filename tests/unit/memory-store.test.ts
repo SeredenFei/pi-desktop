@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryStore, mergeMemoryDocuments, type MemoryDocument } from "../../server/memory-store.js";
 import { parseMarkers } from "../../server/markers/marker.js";
@@ -120,5 +121,40 @@ describe("MemoryStore & cross-device merge", () => {
 			{ op: "add", scope: "project", text: "Database is PostgreSQL 16" },
 			{ op: "forget", id: "abc123" },
 		]);
+	});
+
+	it("captures and materializes Chat space & Chat Project transcripts across devices", () => {
+		const deviceADir = makeTempDir();
+		const storeA = new MemoryStore(deviceADir);
+		const chatProjA = storeA.createChatProject("Paper Reading");
+
+		// Simulate a JSONL transcript inside device A's Chat Project session directory
+		const sessionDirA = SessionManager.create(chatProjA.path).getSessionDir();
+		const sampleFile = join(sessionDirA, "chat-session-1.jsonl");
+		const lines = [
+			JSON.stringify({ type: "session", id: "sid-chat-1", cwd: chatProjA.path, timestamp: new Date().toISOString() }),
+			JSON.stringify({
+				type: "message",
+				message: { role: "user", content: "Summarize this paper", timestamp: Date.now() },
+			}),
+		];
+		writeFileSync(sampleFile, `${lines.join("\n")}\n`, "utf8");
+
+		expect(storeA.captureChatTranscriptsFromDisk(false)).toBe(true);
+		const exportedDoc = storeA.getDocument();
+		expect(exportedDoc.chatTranscripts?.["sid-chat-1"]).toBeDefined();
+		expect(exportedDoc.chatTranscripts?.["sid-chat-1"]?.jsonl).toContain("__PI_CHAT_PROJECT__:Paper-Reading");
+
+		// Merge into Device B and verify the transcript is materialized with Device B's local path
+		const deviceBDir = makeTempDir();
+		const storeB = new MemoryStore(deviceBDir);
+		storeB.mergeRemote(exportedDoc);
+
+		const chatProjBPath = join(deviceBDir, "chat-projects", "Paper-Reading");
+		const sessionDirB = SessionManager.create(chatProjBPath).getSessionDir();
+		const restoredFile = join(sessionDirB, "chat-session-1.jsonl");
+		expect(existsSync(restoredFile)).toBe(true);
+		const restoredHeader = JSON.parse(readFileSync(restoredFile, "utf8").split("\n")[0]!);
+		expect(restoredHeader.cwd).toBe(chatProjBPath);
 	});
 });

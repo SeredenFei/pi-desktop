@@ -11,13 +11,16 @@
  * 4. 渲染注入系统提示词的 <user_memory> XML 片段。
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { normalizePathKey } from "./client-state.js";
 
 export const MAX_MEMORY_ITEM_CHARS = 300;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 export const MAX_PROJECT_INSTRUCTIONS_CHARS = 4000;
+export const MAX_SYNCED_CHAT_TRANSCRIPTS = 40;
+export const MAX_TRANSCRIPT_BYTES = 120 * 1024;
 
 export type MemoryScope = "global" | "project";
 
@@ -47,6 +50,16 @@ export interface ProjectMemoryBucket {
 	items: MemoryItem[];
 }
 
+export interface SyncedChatTranscript {
+	sessionId: string;
+	fileName: string;
+	/** "chat-space" 或 "chat-project:<slug>" */
+	scopeKey: string;
+	updatedAt: number;
+	/** 便携化后的 JSONL 文本（首行 cwd 使用跨平台占位符 __PI_CHAT_SPACE__ / __PI_CHAT_PROJECT__:<slug>）。 */
+	jsonl: string;
+}
+
 export interface MemoryDocument {
 	version: 1;
 	updatedAt: number;
@@ -54,6 +67,8 @@ export interface MemoryDocument {
 	projects: Record<string, ProjectMemoryBucket>;
 	/** 开启了「🔒 独立记忆（不读写共享记忆）」的会话 ID 列表。 */
 	isolatedSessionIds?: string[];
+	/** 跨端同步的 Chat 空间（独立对话 + Chat Projects）轻量对话记录。 */
+	chatTranscripts?: Record<string, SyncedChatTranscript>;
 }
 
 export interface MemorySnapshotView {
@@ -229,6 +244,25 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 			};
 		}
 	}
+	const mergedTranscripts: Record<string, SyncedChatTranscript> = {};
+	const allTranscriptIds = new Set([
+		...Object.keys(local.chatTranscripts ?? {}),
+		...Object.keys(remote.chatTranscripts ?? {}),
+	]);
+	const transcriptList: SyncedChatTranscript[] = [];
+	for (const sid of allTranscriptIds) {
+		const lt = local.chatTranscripts?.[sid];
+		const rt = remote.chatTranscripts?.[sid];
+		const chosen = lt && rt ? ((rt.updatedAt ?? 0) >= (lt.updatedAt ?? 0) ? rt : lt) : (lt ?? rt);
+		if (chosen && chosen.sessionId && chosen.jsonl && chosen.jsonl.length <= MAX_TRANSCRIPT_BYTES) {
+			transcriptList.push(chosen);
+		}
+	}
+	transcriptList.sort((a, b) => b.updatedAt - a.updatedAt);
+	for (const t of transcriptList.slice(0, MAX_SYNCED_CHAT_TRANSCRIPTS)) {
+		mergedTranscripts[t.sessionId] = t;
+	}
+
 	return {
 		version: 1,
 		updatedAt: Math.max(local.updatedAt ?? 0, remote.updatedAt ?? 0, Date.now()),
@@ -237,6 +271,7 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 		isolatedSessionIds: [...new Set([...(local.isolatedSessionIds ?? []), ...(remote.isolatedSessionIds ?? [])])].slice(
 			-500,
 		),
+		chatTranscripts: mergedTranscripts,
 	};
 }
 
@@ -281,6 +316,7 @@ export class MemoryStore {
 				isolatedSessionIds: Array.isArray(raw.isolatedSessionIds)
 					? raw.isolatedSessionIds.filter((x): x is string => typeof x === "string")
 					: [],
+				chatTranscripts: raw.chatTranscripts && typeof raw.chatTranscripts === "object" ? raw.chatTranscripts : {},
 			});
 		} catch {
 			return emptyDocument();
@@ -314,12 +350,139 @@ export class MemoryStore {
 		return JSON.parse(JSON.stringify(this.doc)) as MemoryDocument;
 	}
 
-	/** 与远端文档合并并落盘（返回合并后的文档）。 */
+	/** 与远端文档合并并落盘（返回合并后的文档，同时将远端 Chat 对话记录还原到本地会话目录）。 */
 	mergeRemote(remote: MemoryDocument): MemoryDocument {
+		this.captureChatTranscriptsFromDisk(false);
 		this.doc = mergeMemoryDocuments(this.doc, remote);
 		this.ensureChatProjectDirs();
+		this.materializeChatTranscriptsToDisk();
 		this.saveToDisk();
 		return this.getDocument();
+	}
+
+	/**
+	 * 扫描本机 Chat 空间（chat-space 与 chat-projects/*）下的 .jsonl 会话记录，
+	 * 打包进 doc.chatTranscripts 以便随 GitHub 云同步上传。
+	 */
+	captureChatTranscriptsFromDisk(notify = true): boolean {
+		const targets: { scopeKey: string; dir: string; placeholder: string }[] = [
+			{
+				scopeKey: "chat-space",
+				dir: resolveChatSpaceDir(this.dataDir),
+				placeholder: "__PI_CHAT_SPACE__",
+			},
+		];
+		for (const cp of this.listChatProjects()) {
+			targets.push({
+				scopeKey: `chat-project:${cp.slug}`,
+				dir: cp.path,
+				placeholder: `__PI_CHAT_PROJECT__:${cp.slug}`,
+			});
+		}
+
+		const nextMap: Record<string, SyncedChatTranscript> = { ...(this.doc.chatTranscripts ?? {}) };
+		let changed = false;
+
+		for (const t of targets) {
+			try {
+				const sessionDir = SessionManager.create(t.dir).getSessionDir();
+				if (!existsSync(sessionDir)) continue;
+				for (const f of readdirSync(sessionDir)) {
+					if (!f.endsWith(".jsonl")) continue;
+					const fp = join(sessionDir, f);
+					let st;
+					try {
+						st = statSync(fp);
+					} catch {
+						continue;
+					}
+					if (st.size === 0 || st.size > MAX_TRANSCRIPT_BYTES) continue;
+					const rawText = readFileSync(fp, "utf8");
+					const nl = rawText.indexOf("\n");
+					const firstLine = (nl >= 0 ? rawText.slice(0, nl) : rawText).trim();
+					if (!firstLine) continue;
+					let header: Record<string, unknown>;
+					try {
+						header = JSON.parse(firstLine) as Record<string, unknown>;
+					} catch {
+						continue;
+					}
+					const sid = typeof header.id === "string" ? header.id : "";
+					if (!sid || this.isSessionIsolated(sid)) continue;
+					header.cwd = t.placeholder;
+					const portableJsonl = JSON.stringify(header) + (nl >= 0 ? rawText.slice(nl) : "\n");
+					const prev = nextMap[sid];
+					const mtime = Math.round(st.mtimeMs);
+					if (!prev || mtime > prev.updatedAt || prev.jsonl.length !== portableJsonl.length) {
+						nextMap[sid] = {
+							sessionId: sid,
+							fileName: f,
+							scopeKey: t.scopeKey,
+							updatedAt: mtime,
+							jsonl: portableJsonl,
+						};
+						changed = true;
+					}
+				}
+			} catch {
+				/* ignore */
+			}
+		}
+
+		if (changed) {
+			this.doc.chatTranscripts = mergeMemoryDocuments(this.doc, {
+				...this.doc,
+				chatTranscripts: nextMap,
+			}).chatTranscripts;
+			this.doc.updatedAt = Date.now();
+			this.saveToDisk();
+			if (notify) this.notifyChange();
+		}
+		return changed;
+	}
+
+	/**
+	 * 将 doc.chatTranscripts 中来自其他设备的 Chat 会话记录落盘到本机对应的会话目录，
+	 * 并把首行 cwd 占位符还原为本机的真实目录路径。
+	 */
+	materializeChatTranscriptsToDisk(): void {
+		const map = this.doc.chatTranscripts ?? {};
+		for (const item of Object.values(map)) {
+			try {
+				if (!item?.sessionId || !item?.jsonl || !item?.fileName) continue;
+				let localDir: string;
+				if (item.scopeKey === "chat-space") {
+					localDir = resolveChatSpaceDir(this.dataDir);
+				} else if (item.scopeKey.startsWith("chat-project:")) {
+					const slug = sanitizeProjectSlug(item.scopeKey.slice("chat-project:".length));
+					localDir = join(resolveChatProjectsRoot(this.dataDir), slug);
+					mkdirSync(localDir, { recursive: true });
+				} else {
+					continue;
+				}
+				const sessionDir = SessionManager.create(localDir).getSessionDir();
+				mkdirSync(sessionDir, { recursive: true });
+				const safeFile = basename(item.fileName);
+				if (!safeFile.endsWith(".jsonl")) continue;
+				const destPath = join(sessionDir, safeFile);
+				if (existsSync(destPath)) {
+					try {
+						const st = statSync(destPath);
+						if (Math.round(st.mtimeMs) >= item.updatedAt) continue;
+					} catch {
+						/* overwrite */
+					}
+				}
+				const nl = item.jsonl.indexOf("\n");
+				const firstLine = (nl >= 0 ? item.jsonl.slice(0, nl) : item.jsonl).trim();
+				const header = JSON.parse(firstLine) as Record<string, unknown>;
+				header.cwd = localDir;
+				const localJsonl = JSON.stringify(header) + (nl >= 0 ? item.jsonl.slice(nl) : "\n");
+				writeFileSync(destPath, localJsonl, "utf8");
+			} catch {
+				/* ignore */
+			}
+		}
 	}
 
 	listActiveItems(scope: MemoryScope, cwd?: string): MemoryItem[] {

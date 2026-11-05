@@ -538,8 +538,27 @@ export function App() {
 	const [localeModalOpen, setLocaleModalOpen] = useState(false);
 	const [updateModalOpen, setUpdateModalOpen] = useState(false);
 	const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+	const [sidebarMode, setSidebarModeState] = useState<"chat" | "work">(() => {
+		try {
+			return localStorage.getItem("pi-web-ui:sidebar-mode") === "chat" ? "chat" : "work";
+		} catch {
+			return "work";
+		}
+	});
+	const setSidebarMode = useCallback((m: "chat" | "work") => {
+		setSidebarModeState(m);
+		try {
+			localStorage.setItem("pi-web-ui:sidebar-mode", m);
+		} catch {
+			/* ignore */
+		}
+	}, []);
 	const activeSessionKey = chat.state?.sessionId || chat.activeConversationId || chat.state?.conversationId || "";
-	const { memory, setMemory, toggleIsolated } = useMemoryState(cwd, activeSessionKey, memoryModalOpen);
+	const { memory, setMemory, toggleIsolated, createChatProject } = useMemoryState(
+		cwd,
+		activeSessionKey,
+		memoryModalOpen,
+	);
 	const refreshWorktrees = useCallback(() => send({ type: "refresh_worktrees" }), [send]);
 	useWorktreeRefresh(chat.state?.worktree?.mainPath, refreshWorktrees);
 	const pendingWorktreeSwitch = useRef<{ source: string; target: string } | null>(null);
@@ -2688,6 +2707,60 @@ export function App() {
 		termDockOpen,
 		isMobile,
 	]);
+	const sidebarProjects = useMemo(() => {
+		if (!minimal) return chat.projects;
+		const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+		const chatSpaceNorm = memory.view?.chatSpaceCwd ? norm(memory.view.chatSpaceCwd) : "";
+		const chatProjNorms = new Set((memory.view?.chatProjects ?? []).map((cp) => norm(cp.path)));
+		const isChatPath = (p: string) => {
+			const np = norm(p);
+			if (!np) return false;
+			if (chatSpaceNorm && np === chatSpaceNorm) return true;
+			if (chatProjNorms.has(np)) return true;
+			return np.includes("/chat-projects/") || np.endsWith("/chat-space");
+		};
+		if (sidebarMode === "chat") {
+			const byNorm = new Map<string, (typeof chat.projects)[number]>();
+			if (memory.view?.chatSpaceCwd) {
+				byNorm.set(chatSpaceNorm, { path: memory.view.chatSpaceCwd, lastUsed: Date.now() + 1 });
+			}
+			for (const cp of memory.view?.chatProjects ?? []) {
+				byNorm.set(norm(cp.path), { path: cp.path, lastUsed: cp.updatedAt || Date.now() });
+			}
+			for (const p of chat.projects) {
+				if (isChatPath(p.path) && !byNorm.has(norm(p.path))) {
+					byNorm.set(norm(p.path), p);
+				}
+			}
+			return [...byNorm.values()];
+		}
+		return chat.projects.filter((p) => !isChatPath(p.path));
+	}, [minimal, sidebarMode, chat.projects, memory.view?.chatSpaceCwd, memory.view?.chatProjects]);
+
+	const handleModeChange = useCallback(
+		(nextMode: "chat" | "work") => {
+			setSidebarMode(nextMode);
+			handleViewChange("chat");
+			if (nextMode === "chat") {
+				const target = memory.view?.chatSpaceCwd;
+				if (target && cwd !== target && !cwd.replace(/\\/g, "/").includes("/chat-projects/")) {
+					send({ type: "set_cwd", path: target });
+				}
+			} else {
+				const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+				const chatSpaceNorm = memory.view?.chatSpaceCwd ? norm(memory.view.chatSpaceCwd) : "";
+				const workProj = chat.projects.find((p) => {
+					const np = norm(p.path);
+					return np !== chatSpaceNorm && !np.includes("/chat-projects/") && !np.endsWith("/chat-space");
+				});
+				if (workProj && norm(cwd) !== norm(workProj.path)) {
+					send({ type: "set_cwd", path: workProj.path });
+				}
+			}
+		},
+		[setSidebarMode, handleViewChange, memory.view?.chatSpaceCwd, cwd, chat.projects, send],
+	);
+
 	// Cmd/Ctrl+,  打开设置（极简外壳没有常驻设置按钮）
 	const sidebarHeader = useMemo(() => {
 		if (!minimal) return undefined;
@@ -2696,24 +2769,43 @@ export function App() {
 			(memory.view?.projectItems.filter((i) => i.enabled).length ?? 0);
 		return (
 			<ChatSpaceHeader
+				mode={sidebarMode}
+				onModeChange={handleModeChange}
 				isChatSpace={Boolean(memory.view?.isChatSpace)}
 				memoryCount={memCount}
 				isolated={memory.isolated}
 				synced={Boolean(memory.sync?.loggedIn)}
-				onEnterChatSpace={enterChatSpace}
-				onNewStandaloneChat={newStandaloneChat}
+				onEnterChatSpace={() => {
+					setSidebarMode("chat");
+					enterChatSpace();
+				}}
+				onNewStandaloneChat={() => {
+					setSidebarMode("chat");
+					newStandaloneChat();
+				}}
+				onCreateChatProject={(name) => {
+					setSidebarMode("chat");
+					void createChatProject(name).then((createdPath) => {
+						if (createdPath) send({ type: "set_cwd", path: createdPath });
+					});
+				}}
 				onOpenMemoryModal={() => setMemoryModalOpen(true)}
 			/>
 		);
 	}, [
 		minimal,
+		sidebarMode,
+		handleModeChange,
 		memory.view?.globalItems,
 		memory.view?.projectItems,
 		memory.view?.isChatSpace,
 		memory.isolated,
 		memory.sync?.loggedIn,
+		setSidebarMode,
 		enterChatSpace,
 		newStandaloneChat,
+		createChatProject,
+		send,
 	]);
 
 	const sidebarFooter = useMemo(() => {
@@ -2998,15 +3090,7 @@ export function App() {
 								conversations={chat.conversations}
 								elsewhere={chat.elsewhere}
 								sessions={chat.sessions}
-								projects={
-									minimal && memory.view?.chatSpaceCwd
-										? chat.projects.filter(
-												(p) =>
-													p.path.replace(/\\/g, "/").toLowerCase() !==
-													memory.view!.chatSpaceCwd.replace(/\\/g, "/").toLowerCase(),
-											)
-										: chat.projects
-								}
+								projects={sidebarProjects}
 								projectSessions={chat.projectSessions}
 								engine={chat.engine}
 								pathCompletions={chat.pathCompletions}

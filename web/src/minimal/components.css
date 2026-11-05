@@ -410,12 +410,87 @@
 		box-shadow: 0 10px 30px var(--glow-18);
 	}
 
-	/* ───────────────────────── 9. 侧栏顶部「独立对话 / 记忆」与记忆管理弹窗 ───────────────────────── */
+	/* ───────────────────────── 9. 侧栏顶部「Chat / Work 分段 + 记忆」与记忆管理弹窗 ───────────────────────── */
 	.shell-minimal .cs-header {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 6px;
 		padding: 8px 8px 4px;
+	}
+	.shell-minimal .cs-mode-bar {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.shell-minimal .cs-mode-seg {
+		flex: 1;
+		display: flex;
+		padding: 2px;
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev2);
+	}
+	.shell-minimal .cs-mode-btn {
+		flex: 1;
+		height: 26px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text-dim);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		font-size: 12.5px;
+		font-weight: 500;
+		cursor: pointer;
+		transition:
+			background var(--dur) var(--ease),
+			color var(--dur) var(--ease);
+	}
+	.shell-minimal .cs-mode-btn.active {
+		background: var(--card-bg);
+		color: var(--text);
+		box-shadow: 0 1px 3px var(--glow-12);
+	}
+	.shell-minimal .cs-memory-pill {
+		height: 30px;
+		padding: 0 8px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		color: var(--text-dim);
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.shell-minimal .cs-memory-pill:hover {
+		background: var(--bg-elev2);
+		color: var(--text);
+	}
+	.shell-minimal .cs-memory-pill.isolated {
+		color: var(--amber);
+		border-color: var(--amber);
+	}
+	.shell-minimal .cs-chat-sub {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.shell-minimal .cs-new-proj-row {
+		padding: 0 2px;
+	}
+	.shell-minimal .cs-new-proj-input {
+		width: 100%;
+		height: 28px;
+		padding: 0 8px;
+		border: 1px solid var(--accent);
+		border-radius: 6px;
+		background: var(--inputbox-bg);
+		color: var(--text);
+		font-size: 12.5px;
+		outline: none;
 	}
 	.shell-minimal .cs-space-row {
 		display: flex;

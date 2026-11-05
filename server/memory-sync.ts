@@ -327,6 +327,7 @@ export class MemorySyncService {
 
 		const acc = this.account;
 		try {
+			this.store.captureChatTranscriptsFromDisk(false);
 			await this.ensureRemoteRepo(acc);
 			const fileUrl = `https://api.github.com/repos/${acc.username}/${acc.repo}/contents/${REMOTE_FILE_PATH}`;
 			const getRes = await this.ghFetch(fileUrl);

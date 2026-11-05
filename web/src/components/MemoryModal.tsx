@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
 	FiArrowUp,
+	FiBriefcase,
 	FiCheck,
 	FiCloud,
 	FiCopy,
@@ -153,81 +154,166 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 		}
 	}, [cwd, sessionId, state.isolated]);
 
+	const createChatProject = useCallback(
+		async (name: string) => {
+			const res = await apiPostMemory("/api/memory/chat-project", { name, sessionId });
+			setState(res);
+			return res.created?.path ?? null;
+		},
+		[sessionId],
+	);
+
 	return {
 		memory: state,
 		setMemory: setState,
 		refreshMemory: refresh,
 		toggleIsolated,
+		createChatProject,
 	};
 }
 
 /**
- * 极简侧栏顶部固定区：
- * 1. 「💬 独立对话（Chats）」一键进入独立纯聊空间（不绑本地代码文件夹）+ 右侧 `+` 直接开新对话；
- * 2. 「🧠 记忆」打开记忆与跨端同步面板（显示生效记忆条数 + 云同步圆点）。
+ * 极简侧栏顶部固定区（Codex 风格 Chat / Work 双模式分栏）：
+ * 1. 顶层「💬 Chat | 🛠 Work」分段切换 + 右侧「🧠 记忆」按钮；
+ * 2. 在 Chat 模式下：提供「💬 独立对话」行与「+ 新建 Chat 项目」行内快速创建。
  */
 export function ChatSpaceHeader({
+	mode,
+	onModeChange,
 	isChatSpace,
 	memoryCount,
 	isolated,
 	synced,
 	onEnterChatSpace,
 	onNewStandaloneChat,
+	onCreateChatProject,
 	onOpenMemoryModal,
 }: {
+	mode: "chat" | "work";
+	onModeChange: (mode: "chat" | "work") => void;
 	isChatSpace: boolean;
 	memoryCount: number;
 	isolated: boolean;
 	synced: boolean;
 	onEnterChatSpace: () => void;
 	onNewStandaloneChat: () => void;
+	onCreateChatProject: (name: string) => void;
 	onOpenMemoryModal: () => void;
 }) {
 	const { locale } = useI18n();
 	const zh = isZhLocale(locale);
+	const [creatingProj, setCreatingProj] = useState(false);
+	const [projName, setProjName] = useState("");
+
+	const submitNewProj = () => {
+		const trimmed = projName.trim();
+		if (!trimmed) return;
+		setProjName("");
+		setCreatingProj(false);
+		onCreateChatProject(trimmed);
+	};
+
 	return (
 		<div className="cs-header" data-testid="chat-space-header">
-			<div className={`cs-space-row${isChatSpace ? " active" : ""}`}>
+			<div className="cs-mode-bar">
+				<div className="cs-mode-seg" role="tablist" aria-label="Workspace mode">
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "chat"}
+						className={`cs-mode-btn${mode === "chat" ? " active" : ""}`}
+						onClick={() => onModeChange("chat")}
+						data-testid="mode-tab-chat"
+					>
+						<FiMessageCircle />
+						<span>Chat</span>
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "work"}
+						className={`cs-mode-btn${mode === "work" ? " active" : ""}`}
+						onClick={() => onModeChange("work")}
+						data-testid="mode-tab-work"
+					>
+						<FiBriefcase />
+						<span>Work</span>
+					</button>
+				</div>
 				<button
 					type="button"
-					className="cs-space-main"
-					onClick={onEnterChatSpace}
-					title={zh ? "独立对话空间（不绑定本地代码文件夹，共享全局记忆）" : "Standalone Chats (shared global memory)"}
-					data-testid="enter-chat-space"
+					className={`cs-memory-pill${isolated ? " isolated" : ""}`}
+					onClick={onOpenMemoryModal}
+					title={
+						isolated
+							? zh
+								? "当前对话：独立记忆（不读写共享记忆）· 点击管理记忆与跨端同步"
+								: "Isolated memory · Click to manage memory & sync"
+							: zh
+								? "管理共享记忆、项目指令与跨端同步"
+								: "Manage shared memory & cloud sync"
+					}
+					data-testid="open-memory-modal"
 				>
-					<FiMessageCircle className="cs-icon" />
-					<span className="cs-label">{zh ? "独立对话" : "Chats"}</span>
-				</button>
-				<button
-					type="button"
-					className="cs-space-add"
-					onClick={onNewStandaloneChat}
-					title={zh ? "新建独立对话" : "New standalone chat"}
-					data-testid="new-standalone-chat"
-				>
-					<FiPlus />
+					{isolated ? <FiLock className="cs-icon" /> : <FiUnlock className="cs-icon" />}
+					<span className="cs-badge">{isolated ? "OFF" : memoryCount}</span>
+					{synced && (
+						<span className="cs-sync-dot" title={zh ? "已连接 GitHub 跨端同步" : "GitHub cloud sync active"} />
+					)}
 				</button>
 			</div>
-			<button
-				type="button"
-				className={`cs-memory-btn${isolated ? " isolated" : ""}`}
-				onClick={onOpenMemoryModal}
-				title={
-					isolated
-						? zh
-							? "当前对话已开启「独立记忆」（不读写共享记忆）· 点击管理记忆与跨端同步"
-							: "Isolated memory active · Click to manage memory & sync"
-						: zh
-							? "管理共享记忆、项目指令与跨端同步"
-							: "Manage shared memory, project instructions & cloud sync"
-				}
-				data-testid="open-memory-modal"
-			>
-				{isolated ? <FiLock className="cs-icon" /> : <FiUnlock className="cs-icon" />}
-				<span className="cs-label">{isolated ? (zh ? "独立记忆" : "Isolated") : zh ? "共享记忆" : "Memory"}</span>
-				<span className="cs-badge">{isolated ? "OFF" : memoryCount}</span>
-				{synced && <span className="cs-sync-dot" title={zh ? "已连接 GitHub 跨端同步" : "GitHub cloud sync active"} />}
-			</button>
+
+			{mode === "chat" && (
+				<div className="cs-chat-sub">
+					<div className={`cs-space-row${isChatSpace ? " active" : ""}`}>
+						<button
+							type="button"
+							className="cs-space-main"
+							onClick={onEnterChatSpace}
+							title={zh ? "独立对话（不绑定项目，自动同步记忆与对话）" : "Standalone Chats"}
+							data-testid="enter-chat-space"
+						>
+							<FiMessageCircle className="cs-icon" />
+							<span className="cs-label">{zh ? "独立对话" : "Standalone Chats"}</span>
+						</button>
+						<button
+							type="button"
+							className="cs-space-add"
+							onClick={onNewStandaloneChat}
+							title={zh ? "新建独立对话" : "New standalone chat"}
+							data-testid="new-standalone-chat"
+						>
+							<FiPlus />
+						</button>
+						<button
+							type="button"
+							className="cs-space-add"
+							onClick={() => setCreatingProj((v) => !v)}
+							title={zh ? "新建 Chat 项目" : "New Chat Project"}
+							data-testid="new-chat-project-btn"
+						>
+							<FiFolderPlus />
+						</button>
+					</div>
+					{creatingProj && (
+						<div className="cs-new-proj-row">
+							<input
+								type="text"
+								className="cs-new-proj-input"
+								autoFocus
+								value={projName}
+								placeholder={zh ? "输入 Chat 项目名称，回车创建…" : "Chat project name, Enter to create…"}
+								onChange={(e) => setProjName(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") submitNewProj();
+									else if (e.key === "Escape") setCreatingProj(false);
+								}}
+								data-testid="new-chat-project-input"
+							/>
+						</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

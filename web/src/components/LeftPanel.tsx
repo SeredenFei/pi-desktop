@@ -533,6 +533,17 @@ export const LeftPanel = memo(function LeftPanel({
 	const [collapsedCurrentProjects, setCollapsedCurrentProjects] = useState<Set<string>>(() => new Set());
 	const [projectVisibleCounts, setProjectVisibleCounts] = useState<Record<string, number>>({});
 	const [loadingProjects, setLoadingProjects] = useState<Set<string>>(() => new Set());
+	// 单项目聚焦（互斥手风琴）：记录当前唯一展开的项目键；点开另一个项目时立即切换此键，自动收起上一个项目
+	const [focusedProjectNorm, setFocusedProjectNorm] = useState<string | null>(() =>
+		currentCwd ? normalizeSessionPathKey(currentCwd) : null,
+	);
+	useEffect(() => {
+		if (!currentCwd) return;
+		const norm = normalizeSessionPathKey(currentCwd);
+		if (!collapsedCurrentProjects.has(norm)) {
+			setFocusedProjectNorm(norm);
+		}
+	}, [currentCwd, collapsedCurrentProjects]);
 
 	const isProjectExpanded = useCallback(
 		(projectPath: string) => {
@@ -1345,7 +1356,11 @@ export const LeftPanel = memo(function LeftPanel({
 		return title && title.length > 0 ? title : t("emptyChat");
 	};
 
-	const projectName = (path: string): string => path.split(/[\\/]/).pop() || path;
+	const projectName = (path: string): string => {
+		const base = path.split(/[\\/]/).pop() || path;
+		if (base === "chat-space") return "💬 独立对话";
+		return base;
+	};
 
 	/** `contextmenu.project`：项目行右键（纯插件位，宿主无内置条目）。与会话菜单同口径：
 	 *  输入类元素让给浏览器；槽位没有可见条目时不抢右键，交回浏览器（检查元素 / 复制照常）。 */
@@ -2266,9 +2281,9 @@ export const LeftPanel = memo(function LeftPanel({
 										const pNorm = normalizeSessionPathKey(p.path);
 										const curNorm = normalizeSessionPathKey(currentCwd);
 										const active = pNorm === curNorm;
-										// 单项目聚焦模式：只有当前选中的项目（active）且未手动收起时才展开子对话列表；非当前项目一律折叠且不渲染小箭头
+										// 单项目聚焦模式：全局最多只有 focusedProjectNorm 这一项处于展开态；打开新项目时旧项目自动收起
 										const isExpanded = singleProjectFocus
-											? active && !collapsedCurrentProjects.has(pNorm)
+											? focusedProjectNorm === pNorm && !collapsedCurrentProjects.has(pNorm)
 											: isProjectExpanded(p.path);
 										const isCollapsed = !isExpanded;
 										const switching =
@@ -2352,7 +2367,21 @@ export const LeftPanel = memo(function LeftPanel({
 														onClick={() => {
 															if (switching) return;
 															if (singleProjectFocus) {
-																// 单项目聚焦模式：单击不展开也不切换，双击才进入并展开
+																// 单项目聚焦：点开另一个项目时，立即把上一个打开的项目收起来，并展开当前要打开的项目
+																if (isExpanded) return;
+																setFocusedProjectNorm(pNorm);
+																setCollapsedCurrentProjects((prev) => {
+																	const next = new Set(prev);
+																	next.delete(pNorm);
+																	return next;
+																});
+																if (!active) {
+																	panelSend({ type: "set_cwd", path: p.path });
+																	panelSend({ type: "list_sessions", path: p.path });
+																	setLoadingProjects((lp) => new Set(lp).add(pNorm));
+																} else {
+																	panelSend({ type: "list_sessions" });
+																}
 																return;
 															}
 															if (!active) panelSend({ type: "set_cwd", path: p.path });
@@ -2362,7 +2391,8 @@ export const LeftPanel = memo(function LeftPanel({
 															e.stopPropagation();
 															if (switching) return;
 															if (singleProjectFocus) {
-																// 双击项目：进入该项目并展开它的对话列表
+																// 双击同样互斥展开该项目（自动收起其他项目）
+																setFocusedProjectNorm(pNorm);
 																setCollapsedCurrentProjects((prev) => {
 																	const next = new Set(prev);
 																	next.delete(pNorm);
@@ -2370,8 +2400,11 @@ export const LeftPanel = memo(function LeftPanel({
 																});
 																if (!active) {
 																	panelSend({ type: "set_cwd", path: p.path });
+																	panelSend({ type: "list_sessions", path: p.path });
+																	setLoadingProjects((lp) => new Set(lp).add(pNorm));
+																} else {
+																	panelSend({ type: "list_sessions" });
 																}
-																panelSend({ type: "list_sessions" });
 																return;
 															}
 															if (active) {
@@ -2389,7 +2422,8 @@ export const LeftPanel = memo(function LeftPanel({
 																onClick={(e) => {
 																	e.stopPropagation();
 																	if (singleProjectFocus) {
-																		// 收起并退出观看该项目
+																		// 收起当前项目并退出观看
+																		setFocusedProjectNorm(null);
 																		setCollapsedCurrentProjects((prev) => new Set(prev).add(pNorm));
 																		onExitProject?.(p.path);
 																		return;
