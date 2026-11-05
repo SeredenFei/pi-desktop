@@ -3,6 +3,10 @@
 	"nativeName": "繁體中文",
 	"version": "0.107.0",
 	"strings": {
+		"desktopQuitTitle": "退出 pi？",
+		"desktopQuitBody": "有 {n} 个任务正在运行，退出会中断它们。",
+		"desktopQuitConfirm": "退出",
+		"desktopQuitCancel": "取消",
 		"presetPluginsTitle": "外掛依赖",
 		"presetPluginsExportHint": "可选择分享外掛代码来源；不包含外掛配置、密钥或权限授权。本地来源不可分享。",
 		"presetPluginsLocal": "本地或不可分享的来源",

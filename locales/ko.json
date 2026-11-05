@@ -3,6 +3,10 @@
 	"nativeName": "한국어",
 	"version": "0.68.1",
 	"strings": {
+		"desktopQuitTitle": "Quit pi?",
+		"desktopQuitBody": "{n} task(s) are still running. Quitting will interrupt them.",
+		"desktopQuitConfirm": "Quit",
+		"desktopQuitCancel": "Cancel",
 		"presetPluginsTitle": "Plugin dependencies",
 		"presetPluginsExportHint": "Choose plugin code sources to share. Settings, secrets and permission grants are excluded. Local sources cannot be shared.",
 		"presetPluginsLocal": "Local or non-portable source",

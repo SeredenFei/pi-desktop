@@ -38,6 +38,16 @@ contextBridge.exposeInMainWorld("piDesktop", {
 			return () => ipcRenderer.removeListener("pi-desktop:window-maximized-change", listener);
 		},
 	},
+	/** 退出确认（redesign P1）：主进程发现有任务在跑时让前端弹应用内确认框。 */
+	quit: {
+		onConfirmRequest: (cb: (req: { id: number; active: number }) => void) => {
+			const listener = (_event: IpcRendererEvent, req: { id: number; active: number }) => cb(req);
+			ipcRenderer.on("pi-desktop:confirm-quit", listener);
+			void ipcRenderer.invoke("pi-desktop:quit-confirm-ready");
+			return () => ipcRenderer.removeListener("pi-desktop:confirm-quit", listener);
+		},
+		decide: (id: number, ok: boolean): Promise<boolean> => ipcRenderer.invoke("pi-desktop:quit-decision", { id, ok }),
+	},
 	updater: {
 		check: () => ipcRenderer.invoke("pi-desktop-updater:check"),
 		download: () => ipcRenderer.invoke("pi-desktop-updater:download"),

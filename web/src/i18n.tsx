@@ -16,6 +16,10 @@ const STORAGE_KEY = "pi-web-ui:lang";
 /* ------------------------------------------------------------------ */
 
 export const zh = {
+	desktopQuitTitle: "退出 pi？",
+	desktopQuitBody: "有 {n} 个任务正在运行，退出会中断它们。",
+	desktopQuitConfirm: "退出",
+	desktopQuitCancel: "取消",
 	presetPluginsTitle: "插件依赖",
 	presetPluginsExportHint: "可选择分享插件代码来源；不包含插件配置、密钥或权限授权。本地来源不可分享。",
 	presetPluginsLocal: "本地或不可分享的来源",
@@ -2701,6 +2705,10 @@ export const zh = {
 /* ------------------------------------------------------------------ */
 
 export const en: Record<keyof typeof zh, string> = {
+	desktopQuitTitle: "Quit pi?",
+	desktopQuitBody: "{n} task(s) are still running. Quitting will interrupt them.",
+	desktopQuitConfirm: "Quit",
+	desktopQuitCancel: "Cancel",
 	presetPluginsTitle: "Plugin dependencies",
 	presetPluginsExportHint:
 		"Choose plugin code sources to share. Settings, secrets and permission grants are excluded. Local sources cannot be shared.",

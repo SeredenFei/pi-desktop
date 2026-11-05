@@ -16,6 +16,11 @@ export interface DesktopWindowBridge {
 	onMaximizedChange: (cb: (maximized: boolean) => void) => () => void;
 }
 
+export interface DesktopQuitBridge {
+	onConfirmRequest: (cb: (req: { id: number; active: number }) => void) => () => void;
+	decide: (id: number, ok: boolean) => Promise<boolean>;
+}
+
 export interface DesktopShellWindow {
 	piDesktop?: {
 		isDesktop?: unknown;
@@ -23,6 +28,7 @@ export interface DesktopShellWindow {
 		setTitleBarOverlay?: (opts: { color?: string; symbolColor?: string }) => Promise<unknown>;
 		onFullScreenChange?: (cb: (isFullScreen: boolean) => void) => () => void;
 		window?: DesktopWindowBridge;
+		quit?: DesktopQuitBridge;
 		updater?: unknown;
 	};
 	navigator?: { userAgent?: unknown };
@@ -48,6 +54,14 @@ export function getDesktopWindowBridge(win?: unknown): DesktopWindowBridge | nul
 		(typeof window === "undefined" ? undefined : (window as unknown as DesktopShellWindow));
 	if (!w || !w.piDesktop?.window) return null;
 	return w.piDesktop.window;
+}
+
+/** 获取桌面端退出确认桥（旧版桌面壳 / 浏览器返回 null）。 */
+export function getDesktopQuitBridge(win?: unknown): DesktopQuitBridge | null {
+	const w =
+		(win as DesktopShellWindow | undefined) ??
+		(typeof window === "undefined" ? undefined : (window as unknown as DesktopShellWindow));
+	return w?.piDesktop?.quit ?? null;
 }
 
 /** 获取桌面操作系统类型，供沉浸式顶栏做平台避让（macOS 避让交通灯，Windows/Linux 避让右上角三键）。 */

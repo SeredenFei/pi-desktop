@@ -29,6 +29,7 @@
 | 文档                                                             | 主题                                                                                                | 何时读                               |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | [`architecture-terminal.md`](architecture-terminal.md)           | 终端 PTY、SCM 只读走 execFile、`ownerKind` 归属、bash 接管分流、SDK process patch hook              | 动终端、bash 路由、Git 面板          |
+| [`redesign-plan.md`](redesign-plan.md)                           | 极简桌面化重构方案：单实例 + 关窗即退的进程模型、新布局、分期验收                                   | 动桌面壳、顶层布局、视觉重构         |
 | [`architecture-attachments.md`](architecture-attachments.md)     | 附件 / 图片 / 视觉桥、预览嗅探与 GBK 回退、512KB 上限、媒体 Range、上传下载安全                     | 动附件、预览、文件保存               |
 | [`architecture-system-prompt.md`](architecture-system-prompt.md) | 系统提示词组装链路：`compose` 模板、`{{tools}}` 目录、override 钩子、项目上下文文件                 | 动提示词、工具描述、上下文注入       |
 | [`tool-context-budget.md`](tool-context-budget.md)               | 工具上下文预算：文案精简、逐工具覆盖、延迟加载、前缀缓存硬约束、只读去重、证据外置、压缩指令        | 工具多到吃预算、延迟加载、上下文优化 |

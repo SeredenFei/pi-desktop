@@ -59,6 +59,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { openContextMenu } from "./context-menu-state";
 import { isExtractableArchive } from "./file-transfer";
 import { BannerContainer } from "./components/BannerContainer";
+import { DesktopQuitConfirm } from "./components/DesktopQuitConfirm";
 import { IconEditor } from "./components/IconEditor";
 import { showBanner, dismissBanner, dismissBannersWhere } from "./banner-notice";
 import { ensurePluginViewLoaded } from "./plugin-loader";
@@ -3522,6 +3523,7 @@ export function App() {
 				/>
 			)}
 			<BannerContainer />
+			<DesktopQuitConfirm />
 		</div>
 	);
 }

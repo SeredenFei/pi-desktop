@@ -11,8 +11,8 @@
  * 开发联调：PI_WEB_DESKTOP_URL=http://localhost:5173 可让窗口指到 vite
  * （仅开发模式生效，打包版忽略该 override —— 见 startServerSidecar）。
  */
-import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { spawn, type ChildProcess } from "node:child_process";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
@@ -21,6 +21,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isAllowedExternalUrl } from "./external-url.js";
 import { createHubBrowser } from "./hub-browser.js";
 import { setupPortableMode } from "./portable.js";
+import { killProcessTree, queryActiveConversations, shutdownSidecar } from "./quit.js";
 import { buildDesktopLoadUrl, DEFAULT_DESKTOP_PORT, resolveHealthTimeoutMs, waitForHealth } from "./startup.js";
 
 // 便携模式初始化：在 app ready 之前完成 Electron userData 重定向与便携环境变量装载
@@ -94,14 +95,15 @@ let serverProc: ChildProcess | null = null;
 let mainWin: BrowserWindow | null = null;
 let serverHealthy = false;
 
-/** 启动失败时清理子进程并以非零码退出（issue #584：避免退出码 0 掩盖启动失败）。 */
+/** 启动失败时清理子进程树并以非零码退出（issue #584：避免退出码 0 掩盖启动失败）。 */
 function exitOnStartupFailure(code = 1): void {
-	try {
-		serverProc?.kill();
-	} catch {
-		/* ignore */
-	}
+	const proc = serverProc;
 	serverProc = null;
+	quitPhase = "done";
+	if (proc?.pid && proc.exitCode === null && proc.signalCode === null) {
+		void killProcessTree(proc.pid, { platform: process.platform }).finally(() => app.exit(code));
+		return;
+	}
 	app.exit(code);
 }
 
@@ -159,8 +161,10 @@ async function startServerSidecar(): Promise<string> {
 				PI_WEB_PORT: String(port),
 				PI_WEB_CWD: cwd,
 				PI_WEB_DATA_DIR: dataDir,
+				// 开启 server 侧桌面 IPC（server/desktop-ipc.ts）：优雅退出 / 忙碌查询 / 父进程断开自退
+				PI_WEB_DESKTOP_IPC: "1",
 			},
-			stdio: "inherit",
+			stdio: ["inherit", "inherit", "inherit", "ipc"],
 			windowsHide: true,
 		},
 	);
@@ -171,6 +175,10 @@ async function startServerSidecar(): Promise<string> {
 		if (!serverHealthy) exitOnStartupFailure(1);
 	});
 	serverProc.on("exit", (code, signal) => {
+		if (quitPhase === "shutting-down" || quitPhase === "done") {
+			console.log(`[desktop] server 已退出（code=${code} signal=${signal}）`);
+			return;
+		}
 		console.error(`[desktop] server 提前退出（code=${code} signal=${signal}），请看上方 server 日志`);
 		earlyExitError = new Error(`server 提前退出（code=${code} signal=${signal}）`);
 		if (!serverHealthy) exitOnStartupFailure(typeof code === "number" && code !== 0 ? code : 1);
@@ -261,6 +269,19 @@ async function createWindow(url: string): Promise<void> {
 	mainWin.on("unmaximize", () => {
 		mainWin?.webContents.send("pi-desktop:window-maximized-change", false);
 	});
+	mainWin.on("close", (e) => {
+		// 关窗 = 退出整个应用（三平台一致），统一走 requestQuit：确认 → 优雅关 server → 树杀兜底
+		if (quitPhase === "done") return;
+		e.preventDefault();
+		void requestQuit();
+	});
+	mainWin.webContents.on("did-start-loading", () => {
+		rendererCanConfirmQuit = false; // 重载后前端需重新登记
+	});
+	mainWin.webContents.on("render-process-gone", () => {
+		rendererCanConfirmQuit = false;
+		resolvePendingQuitConfirm(true); // 前端挂了：不再等它的答复，按“退出”处理
+	});
 	mainWin.on("closed", () => {
 		mainWin = null;
 	});
@@ -268,7 +289,8 @@ async function createWindow(url: string): Promise<void> {
 
 // 单实例：第二个实例聚焦已有窗口（和网页版多标签页各走独立 clientId 不冲突）。
 if (!app.requestSingleInstanceLock()) {
-	app.quit();
+	// 已有实例：直接退出（不走 before-quit 协调，此时还没有 server 子进程）
+	app.exit(0);
 } else {
 	app.on("second-instance", () => {
 		if (mainWin) {
@@ -294,16 +316,126 @@ void app.whenReady().then(async () => {
 	}
 });
 
+// ── 退出协调（redesign P1）───────────────────────────────────────────────
+// 所有退出入口（窗口 ✕ / 自绘关闭键 / Cmd+Q / Alt+F4 / 菜单 Quit / Dock 退出）都汇到 requestQuit：
+//   1. 问 server 有无正在执行的会话；有则让前端弹应用内确认框（前端不可用时回落原生对话框）；
+//   2. 立即隐藏窗口（体感上“秒关”），后台优雅关 server，超时树杀 + 快照扫尾；
+//   3. app.exit(0)。
+type QuitPhase = "idle" | "confirming" | "shutting-down" | "done";
+let quitPhase: QuitPhase = "idle";
+let rendererCanConfirmQuit = false;
+let quitConfirmSeq = 0;
+let pendingQuitConfirm: { id: number; resolve: (ok: boolean) => void } | null = null;
+
+function resolvePendingQuitConfirm(ok: boolean): void {
+	const p = pendingQuitConfirm;
+	pendingQuitConfirm = null;
+	p?.resolve(ok);
+}
+
+async function confirmQuit(active: number): Promise<boolean> {
+	const win = mainWin;
+	if (!win || win.isDestroyed()) return true;
+	if (win.isMinimized()) win.restore();
+	win.show();
+	win.focus();
+	if (rendererCanConfirmQuit) {
+		const id = ++quitConfirmSeq;
+		return new Promise<boolean>((resolve) => {
+			pendingQuitConfirm = { id, resolve };
+			win.webContents.send("pi-desktop:confirm-quit", { id, active });
+		});
+	}
+	const r = await dialog.showMessageBox(win, {
+		type: "warning",
+		buttons: ["退出", "取消"],
+		defaultId: 1,
+		cancelId: 1,
+		message: `有 ${active} 个任务正在运行，确定退出？`,
+		detail: "退出会中断这些任务。",
+	});
+	return r.response === 0;
+}
+
+async function shutdownServerForQuit(): Promise<void> {
+	const proc = serverProc;
+	serverProc = null;
+	const r = await shutdownSidecar(proc, {
+		platform: process.platform,
+		graceMs: 5000,
+		log: (m) => console.log(m),
+	});
+	console.log(`[desktop] server 已关闭（${r.mode}）`);
+}
+
+async function requestQuit(opts: { skipConfirm?: boolean } = {}): Promise<void> {
+	if (quitPhase === "confirming") {
+		// 确认框已在：再点 ✕ 只是把窗口拉到前台
+		if (mainWin && !mainWin.isDestroyed()) mainWin.focus();
+		return;
+	}
+	if (quitPhase !== "idle") return;
+	quitPhase = "confirming";
+	if (!opts.skipConfirm) {
+		const active = await queryActiveConversations(serverProc);
+		if (active > 0 && !(await confirmQuit(active))) {
+			quitPhase = "idle";
+			return;
+		}
+	}
+	quitPhase = "shutting-down";
+	if (mainWin && !mainWin.isDestroyed()) mainWin.hide();
+	try {
+		await shutdownServerForQuit();
+	} catch (err) {
+		console.error(`[desktop] 关闭 server 出错：${(err as Error).message}`);
+	}
+	quitPhase = "done";
+	// 用 app.quit 而非 app.exit：保留 quit 事件，electron-updater 的 autoInstallOnAppQuit 依赖它。
+	// before-quit / close 见 done 直接放行。
+	app.quit();
+}
+
+ipcMain.handle("pi-desktop:quit-confirm-ready", (event) => {
+	if (event.sender !== mainWin?.webContents) return false;
+	rendererCanConfirmQuit = true;
+	return true;
+});
+ipcMain.handle("pi-desktop:quit-decision", (event, payload: unknown) => {
+	if (event.sender !== mainWin?.webContents) return false;
+	const p = payload as { id?: unknown; ok?: unknown } | null;
+	if (!pendingQuitConfirm || !p || p.id !== pendingQuitConfirm.id) return false;
+	resolvePendingQuitConfirm(p.ok === true);
+	return true;
+});
+
+app.on("before-quit", (e) => {
+	// Cmd+Q / 菜单 Quit / Dock 退出 / 系统注销：同样走确认 + 优雅关闭
+	if (quitPhase === "done") return;
+	e.preventDefault();
+	void requestQuit();
+});
 app.on("window-all-closed", () => {
-	if (process.platform !== "darwin") app.quit();
+	// 三平台统一：没有窗口就退出（含 macOS，不保留 Dock 常驻）
+	void requestQuit({ skipConfirm: true });
 });
 app.on("activate", () => {
-	// macOS 点 dock 时窗口已关：server sidecar 还在，本骨架暂不重建窗口，退出重进即可。
-	if (BrowserWindow.getAllWindows().length === 0) app.quit();
+	if (BrowserWindow.getAllWindows().length === 0) void requestQuit({ skipConfirm: true });
 });
 app.on("will-quit", () => {
-	serverProc?.kill();
+	// 正常路径走 app.exit 不会到这里；若有其它路径绕过了 requestQuit，同步树杀兜底，绝不留孤儿。
+	const proc = serverProc;
 	serverProc = null;
+	if (!proc?.pid || proc.exitCode !== null || proc.signalCode !== null) return;
+	if (process.platform === "win32") {
+		spawnSync("taskkill", ["/F", "/T", "/PID", String(proc.pid)], { windowsHide: true, timeout: 5000 });
+	} else {
+		try {
+			proc.kill("SIGKILL");
+		} catch {
+			/* gone */
+		}
+	}
 });
 
 // -- 沉浸式标题栏与窗口控制（Windows / Linux 前端一体化控制三键） ----------
@@ -452,7 +584,12 @@ async function wireAutoUpdater(): Promise<void> {
 		await autoUpdater.downloadUpdate();
 		return true;
 	});
-	ipcMain.handle("pi-desktop-updater:quit-install", () => {
+	ipcMain.handle("pi-desktop-updater:quit-install", async () => {
+		// 先按正常退出流程关掉 server 进程树，再交给 electron-updater 退出安装（before-quit 见 done 放行）。
+		if (quitPhase !== "idle") return false;
+		quitPhase = "shutting-down";
+		await shutdownServerForQuit();
+		quitPhase = "done";
 		autoUpdater.quitAndInstall(false, true);
 		return true;
 	});

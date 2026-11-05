@@ -46,6 +46,7 @@ import { registerFileTransferRoutes } from "./file-transfer-routes.js";
 import { initAttachmentStore, findAttachment } from "./attachment-store.js";
 import { isOfficeFile, OFFICE_MAX_FILE_BYTES, unzipFiles } from "./office-parse.js";
 import { startControlServer } from "./control-socket.js";
+import { wireDesktopIpc } from "./desktop-ipc.js";
 import { scheduleUploadCleanup } from "./uploads.js";
 import { ensureWindowsBash, windowsBashDir } from "./ensure-bash.js";
 import { listThemes, readThemeCss, resolveThemeFile } from "./themes.js";
@@ -4159,6 +4160,12 @@ async function shutdown(signal: "SIGINT" | "SIGTERM" = "SIGINT"): Promise<void> 
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+// 桌面壳 IPC（仅 Electron 以 ipc 通道 + PI_WEB_DESKTOP_IPC=1 拉起时生效）：优雅退出 / 忙碌查询 / 父进程断开自退。
+wireDesktopIpc({
+	activeConversations: () => service.activeConversations(),
+	shutdown: () => void shutdown("SIGTERM"),
+	isShuttingDown: () => shuttingDown,
+});
 process.on("unhandledRejection", (reason: unknown) => {
 	console.error("[pi-web-ui] Unhandled Promise Rejection:", reason);
 });
