@@ -128,6 +128,7 @@ async function main() {
 		args: ["--no-sandbox"],
 	});
 	const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+	await page.addInitScript(() => localStorage.setItem("pi-web-ui:shell", "classic")); // 本测试验证经典外壳（TopBar/SideDock/FooterBar），redesign P3 移除经典外壳前保留
 	page.on("pageerror", (e) => console.log("[pageerror]", e.message));
 	await page.goto(`http://localhost:${PORT}/`);
 	await page.waitForSelector(".topbar", { timeout: 20000 });

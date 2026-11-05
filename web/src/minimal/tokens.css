@@ -1,0 +1,296 @@
+/*
+ * 极简外壳设计变量（redesign P2，docs/redesign-plan.md §12）。
+ *
+ * 只在 <html data-shell="minimal"> 下生效；明暗由 data-scheme="light|dark" 决定
+ * （web/src/shell-mode.ts 写入）。覆盖的是 styles.css 里 :root 的同名变量，所以旧组件
+ * 不改代码也会跟着换色；P3 换皮时再逐个组件细调。
+ *
+ * 层：`minimal` 排在 guard/base/theme 之后（声明见 styles.css 顶部），压过 base 与旧主题。
+ * 视觉基调：暖米白 / 暖深灰底、单一强调色赤陶橙、无边框分割、留白区分层级。
+ */
+@layer minimal {
+	html[data-shell="minimal"] {
+		/* —— 共用：字体、圆角、动效、强调色 —— */
+		--sans:
+			ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, "PingFang SC",
+			"Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Roboto, Helvetica, Arial, sans-serif;
+		--mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+		--radius-sm: 8px;
+		--radius-md: 10px;
+		--radius-lg: 12px;
+		--ease: cubic-bezier(0.2, 0, 0, 1);
+		--dur: 150ms;
+		--titlebar-h: 40px;
+
+		--accent: #d97757;
+		--accent-hover: #c4664a;
+		--accent-contrast: #ffffff;
+		--brand-grad-a: #d97757;
+		--brand-grad-b: #c4664a;
+		--send-blue: #d97757;
+		--send-blue-hover: #c4664a;
+		--on-send-blue: #ffffff;
+		--on-send-blue-hover: #ffffff;
+		--term-cursor: #d97757;
+		--switch-bg-on: #d97757;
+		--switch-border-on: #d97757;
+		--switch-knob-on: #ffffff;
+		--button-primary-bg: #d97757;
+		--button-primary-fg: #ffffff;
+		--button-primary-hover-bg: #c4664a;
+		--button-primary-hover-fg: #ffffff;
+		--bg-image: none;
+	}
+
+	/* ———————————————————————————— 深色 ———————————————————————————— */
+	html[data-shell="minimal"][data-scheme="dark"] {
+		color-scheme: dark;
+		--bg: #262624;
+		--bg-elev: #1f1e1d;
+		--bg-elev2: #30302e;
+		--bg-elev3: rgba(255, 255, 255, 0.04);
+		--sunken-bg: rgba(0, 0, 0, 0.18);
+		--border: #3a3936;
+		--border-soft: #31302d;
+		--text: #ecebe6;
+		--text-dim: #b4b1a8;
+		--text-faint: #85827a;
+		--accent-soft: rgba(217, 119, 87, 0.16);
+
+		--panel-bg: #1f1e1d;
+		--topbar-bg: #262624;
+		--statusbar-bg: #262624;
+		--msgs-bg: #262624;
+		--card-bg: #2c2c2a;
+		--menu-bg: #30302e;
+		--chip-bg: #34332f;
+		--inputbox-bg: #30302e;
+		--tooltip-bg: #3a3936;
+
+		--green: #6cbf8b;
+		--green-soft: rgba(108, 191, 139, 0.14);
+		--red: #e07a6f;
+		--red-soft: rgba(224, 122, 111, 0.14);
+		--amber: #e0b062;
+		--blue: #7aa7e8;
+		--blue-soft: rgba(122, 167, 232, 0.14);
+		--on-green: #1a1a1a;
+		--on-red: #1a1a1a;
+		--on-amber: #1a1a1a;
+		--on-blue: #1a1a1a;
+		--stop-red: #c9574c;
+		--stop-red-hover: #b54a40;
+		--on-stop-red: #ffffff;
+		--on-stop-red-hover: #ffffff;
+
+		--code-bg: #1e1d1b;
+		--code-text: #dedbd2;
+		--err-text: #eba59d;
+		--red-text: #eba59d;
+		--amber-text: #ebc58a;
+		--info-blue: #8fb5ee;
+		--link: #e6987c;
+		--link-hover: #f0ae95;
+		--link-soft: #f3c4b2;
+		--md-strong: #f5f4ef;
+		--skill-blue: #8fb5ee;
+		--plugin-purple: #b9a2e6;
+		--auth-green: #6cbf8b;
+		--scroll-thumb: #45433f;
+		--scroll-thumb-hover: #57554f;
+		--notice-err-bg: #3d2724;
+		--notice-warn-bg: #3a3122;
+		--notice-info-bg: #26303d;
+		--notice-err-border: #e07a6f;
+		--notice-warn-border: #e0b062;
+		--notice-info-border: #7aa7e8;
+
+		--button-bg: transparent;
+		--button-fg: #dedbd2;
+		--button-border: #3a3936;
+		--button-hover-bg: #34332f;
+		--button-hover-fg: #f5f4ef;
+		--button-hover-border: #45433f;
+		--control-fg: #b4b1a8;
+		--control-bg: #30302e;
+		--control-border: #3a3936;
+		--switch-knob: #ecebe6;
+		--switch-bg-off: #45433f;
+		--switch-border-off: #57554f;
+
+		--glow-015: rgba(0, 0, 0, 0.06);
+		--glow-025: rgba(0, 0, 0, 0.08);
+		--glow-03: rgba(0, 0, 0, 0.1);
+		--glow-04: rgba(0, 0, 0, 0.12);
+		--glow-05: rgba(0, 0, 0, 0.14);
+		--glow-12: rgba(0, 0, 0, 0.2);
+		--glow-18: rgba(0, 0, 0, 0.26);
+		--glow-22: rgba(0, 0, 0, 0.3);
+		--glow-38: rgba(0, 0, 0, 0.42);
+
+		--term-bg: #1e1d1b;
+		--term-fg: #dedbd2;
+		--term-cursor-accent: #1e1d1b;
+		--term-selection: rgba(217, 119, 87, 0.3);
+		--term-black: #30302e;
+		--term-red: #e07a6f;
+		--term-green: #6cbf8b;
+		--term-yellow: #e0b062;
+		--term-blue: #7aa7e8;
+		--term-magenta: #c49ae0;
+		--term-cyan: #6fc2c9;
+		--term-white: #dedbd2;
+		--term-bright-black: #85827a;
+		--term-bright-red: #eba59d;
+		--term-bright-green: #8fd3a8;
+		--term-bright-yellow: #ebc58a;
+		--term-bright-blue: #9fc0f0;
+		--term-bright-magenta: #d6b8eb;
+		--term-bright-cyan: #95d6db;
+		--term-bright-white: #ffffff;
+	}
+
+	/* ———————————————————————————— 浅色 ———————————————————————————— */
+	html[data-shell="minimal"][data-scheme="light"] {
+		color-scheme: light;
+		--bg: #faf9f5;
+		--bg-elev: #f3f1ea;
+		--bg-elev2: #ebe8df;
+		--bg-elev3: rgba(0, 0, 0, 0.03);
+		--sunken-bg: rgba(0, 0, 0, 0.035);
+		--border: #e3dfd4;
+		--border-soft: #ece9e0;
+		--text: #1f1e1c;
+		--text-dim: #5e5b54;
+		--text-faint: #8f8b82;
+		--accent-soft: rgba(217, 119, 87, 0.12);
+
+		--panel-bg: #f3f1ea;
+		--topbar-bg: #faf9f5;
+		--statusbar-bg: #faf9f5;
+		--msgs-bg: #faf9f5;
+		--card-bg: #ffffff;
+		--menu-bg: #ffffff;
+		--chip-bg: #efece4;
+		--inputbox-bg: #ffffff;
+		--tooltip-bg: #2b2a27;
+
+		--green: #2f8f5b;
+		--green-soft: rgba(47, 143, 91, 0.1);
+		--red: #c2413a;
+		--red-soft: rgba(194, 65, 58, 0.1);
+		--amber: #a8670f;
+		--blue: #3767c8;
+		--blue-soft: rgba(55, 103, 200, 0.1);
+		--on-green: #ffffff;
+		--on-red: #ffffff;
+		--on-amber: #ffffff;
+		--on-blue: #ffffff;
+		--stop-red: #c2413a;
+		--stop-red-hover: #a8362f;
+		--on-stop-red: #ffffff;
+		--on-stop-red-hover: #ffffff;
+
+		--code-bg: #f2f0e9;
+		--code-text: #2a2926;
+		--err-text: #b3362f;
+		--red-text: #b3362f;
+		--amber-text: #8f560a;
+		--info-blue: #3767c8;
+		--link: #b85c3e;
+		--link-hover: #9a4a30;
+		--link-soft: #b85c3e;
+		--md-strong: #121110;
+		--skill-blue: #3767c8;
+		--plugin-purple: #7b55c7;
+		--auth-green: #2f8f5b;
+		--scroll-thumb: #d6d2c7;
+		--scroll-thumb-hover: #bfbaae;
+		--notice-err-bg: #f6e4e1;
+		--notice-warn-bg: #f5ecdc;
+		--notice-info-bg: #e3eaf6;
+		--notice-err-border: #c2413a;
+		--notice-warn-border: #a8670f;
+		--notice-info-border: #3767c8;
+
+		--button-bg: transparent;
+		--button-fg: #3a3834;
+		--button-border: #e3dfd4;
+		--button-hover-bg: #ebe8df;
+		--button-hover-fg: #1f1e1c;
+		--button-hover-border: #d6d2c7;
+		--control-fg: #5e5b54;
+		--control-bg: #ffffff;
+		--control-border: #e3dfd4;
+		--switch-knob: #ffffff;
+		--switch-bg-off: #d6d2c7;
+		--switch-border-off: #bfbaae;
+
+		--glow-015: rgba(0, 0, 0, 0.02);
+		--glow-025: rgba(0, 0, 0, 0.02);
+		--glow-03: rgba(0, 0, 0, 0.025);
+		--glow-04: rgba(0, 0, 0, 0.03);
+		--glow-05: rgba(0, 0, 0, 0.035);
+		--glow-12: rgba(0, 0, 0, 0.06);
+		--glow-18: rgba(0, 0, 0, 0.09);
+		--glow-22: rgba(0, 0, 0, 0.12);
+		--glow-38: rgba(0, 0, 0, 0.2);
+
+		--term-bg: #fdfcf9;
+		--term-fg: #1f1e1c;
+		--term-cursor-accent: #fdfcf9;
+		--term-selection: rgba(217, 119, 87, 0.25);
+		--term-black: #e3dfd4;
+		--term-red: #c2413a;
+		--term-green: #2f8f5b;
+		--term-yellow: #a8670f;
+		--term-blue: #3767c8;
+		--term-magenta: #8a4fc4;
+		--term-cyan: #19808a;
+		--term-white: #1f1e1c;
+		--term-bright-black: #8f8b82;
+		--term-bright-red: #c2413a;
+		--term-bright-green: #2f8f5b;
+		--term-bright-yellow: #a8670f;
+		--term-bright-blue: #3767c8;
+		--term-bright-magenta: #8a4fc4;
+		--term-bright-cyan: #19808a;
+		--term-bright-white: #000000;
+	}
+}
+
+/*
+ * 代码高亮浅色覆盖：highlight.js 的 github-dark 是在 main.tsx 里**未分层**导入的，
+ * 未分层声明压过任何层，所以这里也必须未分层，靠更高的选择器特异性取胜。
+ */
+html[data-shell="minimal"][data-scheme="light"] .hljs {
+	color: #2a2926;
+	background: var(--code-bg);
+}
+html[data-shell="minimal"][data-scheme="light"] :is(.hljs-doctag, .hljs-keyword, .hljs-template-tag, .hljs-type) {
+	color: #b3362f;
+}
+html[data-shell="minimal"][data-scheme="light"] :is(.hljs-title, .hljs-title.function_, .hljs-title.class_) {
+	color: #7b55c7;
+}
+html[data-shell="minimal"][data-scheme="light"]
+	:is(.hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable) {
+	color: #3767c8;
+}
+html[data-shell="minimal"][data-scheme="light"] :is(.hljs-regexp, .hljs-string) {
+	color: #2f7a4f;
+}
+html[data-shell="minimal"][data-scheme="light"] :is(.hljs-built_in, .hljs-symbol) {
+	color: #a8670f;
+}
+html[data-shell="minimal"][data-scheme="light"] :is(.hljs-comment, .hljs-quote) {
+	color: #8f8b82;
+}
+html[data-shell="minimal"][data-scheme="light"] .hljs-addition {
+	color: #2f7a4f;
+	background: #e3f2e8;
+}
+html[data-shell="minimal"][data-scheme="light"] .hljs-deletion {
+	color: #b3362f;
+	background: #f8e5e2;
+}

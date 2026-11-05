@@ -118,7 +118,11 @@ try {
 	}
 	await page.keyboard.press("Escape");
 	await panel.waitFor({ state: "detached" });
-	await page.evaluate(() => localStorage.setItem("pi-web-ui:theme", "flow-light"));
+	// 旧主题样式表只在经典外壳下加载（极简外壳用 web/src/minimal/tokens.css），验证旧主题时切回经典
+	await page.evaluate(() => {
+		localStorage.setItem("pi-web-ui:theme", "flow-light");
+		localStorage.setItem("pi-web-ui:shell", "classic");
+	});
 	await page.reload();
 	await badge.waitFor();
 	await page.waitForFunction(

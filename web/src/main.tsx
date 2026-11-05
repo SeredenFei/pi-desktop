@@ -6,7 +6,10 @@ import { App } from "./App";
 import { LanguageProvider } from "./i18n";
 import "./styles.css";
 import "highlight.js/styles/github-dark.css";
+import "./minimal/tokens.css";
+import "./minimal/shell.css";
 import { applyTheme, loadTheme } from "./theme";
+import { applyShellAttrs, readScheme, readShellMode } from "./shell-mode";
 import { applyFavicon } from "./favicon-settings";
 import { setupDesktopWindowDecorations } from "./desktop";
 import { initAuthToken } from "./auth-token";
@@ -94,7 +97,10 @@ initAuthToken();
 
 // Apply the persisted theme before first render so there's no flash of the
 // wrong palette. The full stylesheet swap happens via an injected <link>.
-applyTheme(loadTheme());
+// 极简外壳不挂旧主题样式表：配色全部来自 web/src/minimal/tokens.css（redesign P2）。
+const initialShell = readShellMode();
+applyShellAttrs(initialShell, readScheme());
+applyTheme(initialShell === "minimal" ? null : loadTheme());
 // Issue #763: 首屏渲染前应用 Favicon 颜色，防止多机器标签页图标闪烁
 applyFavicon();
 // 桌面端初始化沉浸式标题栏窗口装饰与避让

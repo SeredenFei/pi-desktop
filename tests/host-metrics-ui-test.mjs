@@ -108,6 +108,7 @@ try {
 
 	browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
 	const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+	await page.addInitScript(() => localStorage.setItem("pi-web-ui:shell", "classic")); // 本测试验证经典外壳（TopBar/SideDock/FooterBar），redesign P3 移除经典外壳前保留
 
 	await page.goto(`http://localhost:${PORT}/`, { waitUntil: "domcontentloaded" });
 	await page.waitForSelector(".statusbar", { timeout: 30000 });

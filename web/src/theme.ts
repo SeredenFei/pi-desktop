@@ -129,7 +129,9 @@ async function fetchThemes(): Promise<ThemeInfo[]> {
 }
 
 /** React hook: theme list + current selection + setter (persists + applies). */
-export function useTheme() {
+export function useTheme(options: { disabled?: boolean } = {}) {
+	/** disabled = 极简外壳：旧主题样式表一律不挂（选择仍保留，切回经典布局时恢复）。 */
+	const disabled = options.disabled === true;
 	const [themes, setThemes] = useState<ThemeInfo[]>([]);
 	const [theme, setTheme] = useState<string | null>(() => loadTheme());
 	// 「服务端已经应答」的唯一可靠信号：WS 连上了。首屏请求可能抢在 listen 之前
@@ -156,9 +158,9 @@ export function useTheme() {
 
 	// 连接建立（首连或重连）时重挂样式表：URL 带新版本戳，浏览器会真的重新请求。
 	useEffect(() => {
-		applyTheme(theme, { reload: connected });
+		applyTheme(disabled ? null : theme, { reload: connected });
 		saveTheme(theme);
-	}, [theme, connected]);
+	}, [theme, connected, disabled]);
 
 	const switchTheme = (id: string | null) => setTheme(id === DEFAULT_THEME_ID ? null : id);
 

@@ -78,6 +78,7 @@ async function main() {
 	const page = await browser.newPage({
 		viewport: { width: 1400, height: 900 },
 	});
+	await page.addInitScript(() => localStorage.setItem("pi-web-ui:shell", "classic")); // 本测试验证经典外壳（TopBar/SideDock/FooterBar），redesign P3 移除经典外壳前保留
 	const consoleErrors = [];
 	page.on("console", (m) => {
 		if (m.type() === "error") consoleErrors.push(m.text());

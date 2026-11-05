@@ -58,6 +58,7 @@ try {
 
 	const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
 	const page = await browser.newPage();
+	await page.addInitScript(() => localStorage.setItem("pi-web-ui:shell", "classic")); // 本测试验证经典外壳（TopBar/SideDock/FooterBar），redesign P3 移除经典外壳前保留
 	page.on("pageerror", (e) => console.error("[pageerror]", e.message));
 	await page.goto(URL);
 	// 新会话页面会自己重载一次（WS hello 的 buildId 与页面烧进去的 id 不一致 → use-chat

@@ -33,6 +33,8 @@ interface GlobalSearchModalProps {
 	onSwitchProject: (path: string) => void;
 	/** Preview a matched file (opens the file preview panel). */
 	onPreviewFile: (path: string, name: string) => void;
+	/** 由命令面板转交的查询词（redesign P2）：打开时若有新的 seed 就填入输入框。 */
+	seedQuery?: { text: string; nonce: number } | null;
 }
 
 /** Case-insensitive substring test (empty needle matches nothing here —
@@ -61,6 +63,7 @@ export function GlobalSearchModal({
 	onSwitchSession,
 	onSwitchProject,
 	onPreviewFile,
+	seedQuery,
 }: GlobalSearchModalProps) {
 	const t = useT();
 	const capabilities = useEngineCapabilities();
@@ -70,7 +73,16 @@ export function GlobalSearchModal({
 	// 「当前」标记与 cwd 变化重探测都靠它）。
 	const cwd = useAppField("cwd");
 	const inputRef = useRef<HTMLInputElement>(null);
-	const [query, setQuery] = useState("");
+	const [query, setQuery] = useState(seedQuery?.text ?? "");
+	// 命令面板每次转交带新的 nonce：即使文本相同也重新填入（弹窗常驻挂载，不能只靠初始值）
+	const seedNonce = seedQuery?.nonce;
+	const appliedSeedRef = useRef(seedNonce);
+	useEffect(() => {
+		if (!open || !seedQuery || appliedSeedRef.current === seedQuery.nonce) return;
+		appliedSeedRef.current = seedQuery.nonce;
+		setQuery(seedQuery.text);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [seedNonce, open]);
 	const deferredQuery = useDeferredValue(query);
 	const [active, setActive] = useState(0);
 	const lastReqRef = useRef(0);

@@ -5,8 +5,10 @@
    base   = 基线组件样式（普通声明，零叹号 important）
    theme  = 主题样式（服务端把主题文件包进这层，你不改）
    普通声明：后面的层优先 → 主题恒压过基线；未分层普通声明胜过任何层内普通声明。
-   需要盖过主题或未分层三方库的结构性复位，写在文件末尾「无层覆盖区」，不用叹号 important。 */
-@layer guard, base, theme;
+   需要盖过主题或未分层三方库的结构性复位，写在文件末尾「无层覆盖区」，不用叹号 important。
+   minimal = 极简外壳（redesign P2）的设计变量与新外壳样式，只在 html[data-shell="minimal"] 下生效，
+             见 web/src/minimal/。 */
+@layer guard, base, theme, minimal;
 
 @layer base {
 	.remote-desktop-window {

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useCallback, useRef, useMemo, Fragment } from "react";
+import { memo, useEffect, useState, useCallback, useRef, useMemo, Fragment, type ReactNode } from "react";
 import { DeviceGroupSection } from "./DeviceGroupSection";
 import {
 	FiAlertCircle,
@@ -151,6 +151,8 @@ interface LeftPanelProps {
 	transition?: WorkspaceTransitionState | null;
 	/** 打开启动沙盒项目弹窗。 */
 	onOpenSandboxModal?: () => void;
+	/** 极简外壳（redesign P2）：侧栏底部固定区（「更多」视图入口 + 设置）。经典布局不传。 */
+	footer?: ReactNode;
 }
 
 function formatModified(ts: number): string {
@@ -383,6 +385,7 @@ export const LeftPanel = memo(function LeftPanel({
 	presetNames,
 	transition,
 	onOpenSandboxModal,
+	footer,
 }: LeftPanelProps) {
 	const t = useT();
 	const capabilities = useEngineCapabilities();
@@ -2584,6 +2587,7 @@ export const LeftPanel = memo(function LeftPanel({
 				onSelectDirectory={(path) => panelSend({ type: "set_cwd", path })}
 				onCreateProject={(path) => panelSend({ type: "make_dir", path, setAsCwd: true })}
 			/>
+			{footer}
 		</aside>
 	);
 });

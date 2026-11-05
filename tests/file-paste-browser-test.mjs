@@ -86,7 +86,7 @@ async function main() {
 
 	await page.goto(`http://localhost:${PORT}/`);
 	await page.waitForSelector(".boot-wait", { state: "hidden", timeout: 60000 });
-	await page.waitForSelector(".topbar", { timeout: 5000 });
+	await page.waitForSelector('.topbar, [data-testid="minimal-titlebar"]', { timeout: 5000 });
 	console.log("app booted");
 
 	// 1) Paste two non-image files into the textarea.

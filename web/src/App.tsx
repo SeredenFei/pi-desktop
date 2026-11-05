@@ -60,6 +60,16 @@ import { openContextMenu } from "./context-menu-state";
 import { isExtractableArchive } from "./file-transfer";
 import { BannerContainer } from "./components/BannerContainer";
 import { DesktopQuitConfirm } from "./components/DesktopQuitConfirm";
+import { MinimalTitleBar } from "./components/MinimalTitleBar";
+import { readTermDockOpen, saveTermDockOpen, TerminalDock } from "./components/TerminalDock";
+import { CommandPalette } from "./components/CommandPalette";
+import { ComposerStatusLine } from "./components/ComposerStatusLine";
+import { useUpdatePanel } from "./components/update-panel";
+import { LocaleModal } from "./components/LocaleModal";
+import { Modal } from "./components/Modal";
+import { SidebarFooter, type SidebarFooterItem } from "./components/SidebarFooter";
+import { useShellPrefs } from "./shell-mode";
+import type { PaletteCommand } from "./command-palette";
 import { IconEditor } from "./components/IconEditor";
 import { showBanner, dismissBanner, dismissBannersWhere } from "./banner-notice";
 import { ensurePluginViewLoaded } from "./plugin-loader";
@@ -239,6 +249,8 @@ function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: (id: nu
 /** Stable empty messages array — keeps the memoized ChatInput prop comparison
  *  cheap before the first snapshot arrives. */
 const EMPTY_MESSAGES: UiMessage[] = [];
+/** 极简外壳文件抽屉开关（默认收起；redesign P2）。 */
+const MINIMAL_FILES_KEY = "pi-web-ui:minimal-files-open";
 
 // ---- 可拖拽面板宽度（桌面端；≤768px 抽屉模式固定宽度不受影响）----
 const PANEL_MIN = 180;
@@ -371,7 +383,7 @@ function addPluginPathGrant(path: string, pluginId?: string): void {
 
 export function App() {
 	const t = useT();
-	const { locale } = useI18n();
+	const { locale, setLocale, packs: localePacks } = useI18n();
 	const { chat, send, dismissNotice, pushNotice, terminal } = useChat();
 	// 快捷短语 seeding：首次看到空列表 → 按界面语言填一批内置常用短语，之后即为用户
 	// 数据（增删改/恢复默认/关闭都在设置里）。「已 seed」标记存服务端全局
@@ -515,6 +527,14 @@ export function App() {
 		!chat.tabs || tab === "chat" || tab === "devices" || tab === "worktrees" || chat.tabs.includes(tab);
 	const viewTab = viewChosen.startsWith("plugin:") ? "plugins" : viewChosen;
 	const view: ViewName = tabOn(viewTab) ? viewChosen : "chat";
+	// —— 极简外壳（redesign P2，docs/redesign-plan.md）—— classic = 旧 TopBar/SideDock/FooterBar 布局
+	const { shell, setShell, scheme, setScheme } = useShellPrefs();
+	const minimal = shell === "minimal";
+	const [paletteOpen, setPaletteOpen] = useState(false);
+	const [searchSeed, setSearchSeed] = useState<{ text: string; nonce: number } | null>(null);
+	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+	const [localeModalOpen, setLocaleModalOpen] = useState(false);
+	const [updateModalOpen, setUpdateModalOpen] = useState(false);
 	const refreshWorktrees = useCallback(() => send({ type: "refresh_worktrees" }), [send]);
 	useWorktreeRefresh(chat.state?.worktree?.mainPath, refreshWorktrees);
 	const pendingWorktreeSwitch = useRef<{ source: string; target: string } | null>(null);
@@ -1312,16 +1332,21 @@ export function App() {
 		};
 	}, [chat, terminal, send]);
 
-	// Ctrl+K / Cmd+K opens global search (also reachable via the topbar button).
+	// Ctrl+K / Cmd+K：极简外壳打开命令面板（含全局搜索入口），经典布局仍是全局搜索。
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "k") return;
 			e.preventDefault();
-			setGlobalSearchOpen((v) => !v);
+			if (minimal) {
+				setGlobalSearchOpen(false);
+				setPaletteOpen((v) => !v);
+			} else {
+				setGlobalSearchOpen((v) => !v);
+			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, []);
+	}, [minimal]);
 
 	// -- zen mode (focus mode) ------------------------------------------------
 	const [zenMode, setZenMode] = useState<boolean>(() => {
@@ -1381,7 +1406,7 @@ export function App() {
 	// -- local TTS announcements (Settings → Sound & Voice) -------------------
 	const [tts, setTts] = useState<TtsSettings>(loadTtsSettings);
 	// -- theme (whole stylesheet swap) ---------------------------------------
-	const { themes, theme, switchTheme, reloadThemes } = useTheme();
+	const { themes, theme, switchTheme, reloadThemes } = useTheme({ disabled: minimal });
 	// -- chat wallpaper (message-list background image, issue #100) -------------
 	useWallpaperEffect();
 	// 插件宿主桥 v8：主题/语言/视图变化通知插件（各是独立 effect，按值触发；
@@ -2251,13 +2276,400 @@ export function App() {
 		[chat.terminals.length, createShell],
 	);
 
+	// ———————— 极简外壳：侧栏 / 文件抽屉 / 底部终端 / 命令面板 / 状态行（redesign P2）————————
+	const openSettings = useCallback((sec?: string) => {
+		setSettingsInitialSection(sec as "plugins" | undefined);
+		setSettingsOpen(true);
+	}, []);
+	const toggleSidebar = useCallback(() => {
+		if (isMobile) setDrawer((d) => (d === "left" ? null : "left"));
+		else toggleLeft();
+	}, [isMobile, toggleLeft]);
+	// 文件抽屉：极简外壳独立记忆、默认收起（经典布局的右栏折叠状态不受影响）
+	const [filesOpen, setFilesOpen] = useState(() => {
+		try {
+			return localStorage.getItem(MINIMAL_FILES_KEY) === "1";
+		} catch {
+			return false;
+		}
+	});
+	const toggleFiles = useCallback(() => {
+		if (isMobile) {
+			setDrawer((d) => (d === "right" ? null : "right"));
+			return;
+		}
+		setFilesOpen((v) => {
+			try {
+				localStorage.setItem(MINIMAL_FILES_KEY, v ? "0" : "1");
+			} catch {
+				/* ignore */
+			}
+			return !v;
+		});
+	}, [isMobile]);
+	// 底部终端面板：打开且没有终端时自动建一个（连接未就绪则等就绪后再建）
+	const [termDockOpen, setTermDockOpenState] = useState(readTermDockOpen);
+	const dockWantsShell = useRef(termDockOpen);
+	const setTermDockOpen = useCallback((open: boolean) => {
+		setTermDockOpenState(open);
+		saveTermDockOpen(open);
+		if (open) dockWantsShell.current = true;
+	}, []);
+	const toggleTermDock = useCallback(() => setTermDockOpen(!termDockOpen), [setTermDockOpen, termDockOpen]);
+	useEffect(() => {
+		if (!minimal || !termDockOpen || !dockWantsShell.current) return;
+		if (chat.terminals.length > 0 || createShell()) dockWantsShell.current = false;
+	}, [minimal, termDockOpen, chat.terminals.length, createShell]);
+	// 极简外壳没有「终端视图」：任何地方切到 terminal（SCM、更新、插件 run-command…）都改为展开底栏，
+	// 视图回到切换前的那个。
+	const lastNonTerminalView = useRef<ViewName>("chat");
+	useEffect(() => {
+		if (view !== "terminal") lastNonTerminalView.current = view;
+	}, [view]);
+	useEffect(() => {
+		if (!minimal || view !== "terminal") return;
+		setTermDockOpen(true);
+		setView(lastNonTerminalView.current);
+	}, [minimal, view, setTermDockOpen]);
+	// Ctrl+` 开关终端（捕获阶段：焦点在 xterm 里也要生效）
+	useEffect(() => {
+		if (!minimal) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+			if (e.code !== "Backquote" && e.key !== "`") return;
+			e.preventDefault();
+			e.stopPropagation();
+			toggleTermDock();
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => window.removeEventListener("keydown", onKey, true);
+	}, [minimal, toggleTermDock]);
+	// 更新面板（与经典顶栏共用 useUpdatePanel）
+	const updatePanel = useUpdatePanel({
+		chat,
+		terminal,
+		onViewChange: handleViewChange,
+		onRan: () => setUpdateModalOpen(false),
+	});
+	useEffect(() => {
+		if (updateModalOpen && chat.ready) send({ type: "check_updates_all" });
+	}, [updateModalOpen, chat.ready, send]);
+	// 按 id 取槽位条目（保留插件 arrange / 用户改名的最终文案）
+	const slotEntryById = useMemo(() => {
+		const m = new Map<string, UiSlotEntry>();
+		for (const list of Object.values(uiSlots) as UiSlotEntry[][])
+			for (const e of list) if (!m.has(e.id)) m.set(e.id, e);
+		return m;
+	}, [uiSlots]);
+	const statusLine = useMemo(() => {
+		const primaryIds = ["host:engine", "host:ctx", "host:cost", "host:working"];
+		if (chat.status !== "open") primaryIds.unshift("host:conn");
+		const primary = primaryIds.map((id) => slotEntryById.get(id)).filter((e): e is UiSlotEntry => !!e);
+		const taken = new Set([...primaryIds, "host:conn", "host:cwd"]);
+		const extra = uiSlots["bottombar"].filter((e) => !e.hidden && !taken.has(e.id));
+		const browser = slotEntryById.get("host:browser");
+		if (browser && !extra.some((e) => e.id === browser.id)) extra.push(browser);
+		return { primary, extra };
+	}, [chat.status, slotEntryById, uiSlots]);
+	const openPanelMinimal = useCallback(
+		(side: "left" | "right") => (side === "left" ? toggleSidebar() : toggleFiles()),
+		[toggleFiles, toggleSidebar],
+	);
+	const newChat = useCallback(
+		(ephemeral = false) => {
+			handleViewChange("chat");
+			send(ephemeral ? { type: "new_chat", ephemeral: true } : { type: "new_chat" });
+			focusComposer();
+		},
+		[handleViewChange, send],
+	);
+	const paletteCommands = useMemo<PaletteCommand[]>(() => {
+		if (!minimal) return [];
+		const G = {
+			chat: t("cmdGroupChat"),
+			view: t("cmdGroupView"),
+			layout: t("cmdGroupLayout"),
+			look: t("cmdGroupAppearance"),
+			lang: t("cmdGroupLanguage"),
+			plug: t("cmdGroupPlugins"),
+			app: t("cmdGroupApp"),
+		};
+		const mod = document.body.classList.contains("is-desktop-mac") ? "⌘" : "Ctrl+";
+		const cmds: PaletteCommand[] = [
+			{ id: "new-chat", group: G.chat, label: t("newChat"), keywords: ["new chat"], run: () => newChat() },
+			...(chat.engine === "dsh"
+				? []
+				: [
+						{
+							id: "new-ephemeral-chat",
+							group: G.chat,
+							label: t("newChatEphemeral"),
+							keywords: ["ephemeral", "temporary"],
+							run: () => newChat(true),
+						},
+					]),
+			{
+				id: "new-sandbox",
+				group: G.chat,
+				label: t("newSandbox"),
+				keywords: ["sandbox"],
+				run: () => setSandboxModalMode("create"),
+			},
+			{
+				id: "open-project",
+				group: G.chat,
+				label: t("openProject"),
+				keywords: ["project", "cwd", "folder"],
+				run: () => setProjectPickerOpen(true),
+			},
+			{ id: "bg-tasks", group: G.chat, label: t("bgTasks"), keywords: ["tasks"], run: () => setBgTasksOpen(true) },
+
+			{
+				id: "toggle-sidebar",
+				group: G.layout,
+				label: t("cmdToggleSidebar"),
+				keywords: ["history", "sessions", "sidebar"],
+				run: toggleSidebar,
+			},
+			{
+				id: "toggle-files",
+				group: G.layout,
+				label: t("cmdToggleFiles"),
+				keywords: ["files", "tree"],
+				run: toggleFiles,
+			},
+			...(tabOn("terminal")
+				? [
+						{
+							id: "toggle-terminal",
+							group: G.layout,
+							label: t("cmdToggleTerminal"),
+							keywords: ["terminal", "shell", "console"],
+							hint: "Ctrl+`",
+							run: toggleTermDock,
+						},
+					]
+				: []),
+			{
+				id: "zen-mode",
+				group: G.layout,
+				label: t("zenMode"),
+				keywords: ["zen", "focus"],
+				hint: "Alt+Z",
+				checked: zenMode,
+				run: toggleZenMode,
+			},
+
+			{
+				id: "view-chat",
+				group: G.view,
+				label: t("chat"),
+				checked: view === "chat",
+				run: () => handleViewChange("chat"),
+			},
+			...(tabOn("git")
+				? [
+						{
+							id: "view-git",
+							group: G.view,
+							label: t("scmTab"),
+							keywords: ["git", "scm", "diff"],
+							checked: view === "git",
+							run: () => handleViewChange("git"),
+						},
+					]
+				: []),
+			...(tabOn("canvas")
+				? [
+						{
+							id: "view-canvas",
+							group: G.view,
+							label: t("canvasTab"),
+							keywords: ["canvas", "workflow"],
+							checked: view === "canvas",
+							run: () => handleViewChange("canvas"),
+						},
+					]
+				: []),
+			...(chat.state?.worktree
+				? [
+						{
+							id: "view-worktrees",
+							group: G.view,
+							label: t("worktreeViewTitle"),
+							keywords: ["worktree"],
+							checked: view === "worktrees",
+							run: () => handleViewChange("worktrees"),
+						},
+					]
+				: []),
+			{
+				id: "view-devices",
+				group: G.view,
+				label: t("deviceCenter"),
+				keywords: ["devices", "device center"],
+				checked: view === "devices",
+				run: () => handleViewChange("devices"),
+			},
+			...(tabOn("plugins")
+				? enabledPlugins
+						.filter((p) => chat.plugins.find((q) => q.id === p.id)?.view)
+						.map((p) => ({
+							id: `view-plugin:${p.id}`,
+							group: G.view,
+							label: p.name ?? p.id,
+							keywords: [p.id, "plugin"],
+							checked: view === `plugin:${p.id}`,
+							run: () => handleViewChange(`plugin:${p.id}` as ViewName),
+						}))
+				: []),
+
+			...(["light", "dark", "system"] as const).map((s) => ({
+				id: `scheme-${s}`,
+				group: G.look,
+				label: t(s === "light" ? "schemeLight" : s === "dark" ? "schemeDark" : "schemeSystem"),
+				keywords: ["theme", s, t("theme")],
+				checked: scheme === s,
+				run: () => setScheme(s),
+			})),
+			{
+				id: "shell-classic",
+				group: G.look,
+				label: t("shellUseClassic"),
+				keywords: ["classic", "layout", "topbar"],
+				run: () => setShell("classic"),
+			},
+
+			...localePacks.map((p) => ({
+				id: `locale-${p.code}`,
+				group: G.lang,
+				label: p.nativeName,
+				keywords: [p.code, "language", t("language")],
+				checked: locale === p.code,
+				run: () => setLocale(p.code),
+			})),
+			{
+				id: "locale-more",
+				group: G.lang,
+				label: t("localeGetMore"),
+				keywords: ["language", "locale"],
+				run: () => setLocaleModalOpen(true),
+			},
+
+			...(tabOn("plugins")
+				? [
+						{
+							id: "plugins-manage",
+							group: G.plug,
+							label: t("pluginMenuTitle"),
+							keywords: ["plugins", "extensions", "marketplace"],
+							run: () => openSettings("plugins"),
+						},
+					]
+				: []),
+		];
+		// 插件贡献到顶栏 / 侧栏 / 溢出菜单的条目：极简外壳没有这些栏，统一收进命令面板。
+		const seen = new Set<string>();
+		for (const slot of ["topbar.primary", "topbar.overflow", "sidebar.left", "sidebar.right"] as const) {
+			for (const e of uiSlots[slot] ?? []) {
+				if (e.source === "host" || seen.has(e.id) || e.id.endsWith(":__view")) continue;
+				seen.add(e.id);
+				if (e.kind === "select" && e.options?.length) {
+					for (const o of e.options) {
+						cmds.push({
+							id: `${e.id}=${o.value}`,
+							group: G.plug,
+							label: `${e.label}: ${o.label}`,
+							checked: e.value === o.value,
+							run: () => onUiAction(e, o.value),
+						});
+					}
+				} else if (e.kind === "view" && e.view) {
+					cmds.push({ id: e.id, group: G.plug, label: e.label, run: () => handleViewChange(e.view as ViewName) });
+				} else if (e.kind === "action" || e.kind === "toggle" || e.kind === "badge") {
+					cmds.push({
+						id: e.id,
+						group: G.plug,
+						label: e.badge ? `${e.label} · ${e.badge}` : e.label,
+						hint: e.hint,
+						checked: e.kind === "toggle" ? e.checked : undefined,
+						run: () => onUiAction(e),
+					});
+				}
+			}
+		}
+		cmds.push(
+			{
+				id: "settings",
+				group: G.app,
+				label: t("settings"),
+				keywords: ["settings", "preferences", "models"],
+				hint: `${mod},`,
+				run: () => openSettings(),
+			},
+			{
+				id: "update",
+				group: G.app,
+				label: t("update"),
+				keywords: ["update", "version", "upgrade"],
+				hint: updatePanel.updatesCount > 0 ? t("updatesAllBadge", { n: updatePanel.updatesCount }) : undefined,
+				run: () => setUpdateModalOpen(true),
+			},
+			{
+				id: "github",
+				group: G.app,
+				label: "GitHub",
+				keywords: ["github", "repo", "issues"],
+				run: () => window.open("https://github.com/xing-shuyin/pi-web-ui", "_blank", "noreferrer,noopener"),
+			},
+		);
+		return cmds;
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		minimal,
+		t,
+		chat.engine,
+		chat.plugins,
+		chat.state?.worktree,
+		view,
+		zenMode,
+		scheme,
+		locale,
+		localePacks,
+		enabledPlugins,
+		uiSlots,
+		updatePanel.updatesCount,
+		termDockOpen,
+		isMobile,
+	]);
+	// Cmd/Ctrl+,  打开设置（极简外壳没有常驻设置按钮）
+	const sidebarFooter = useMemo(() => {
+		if (!minimal) return undefined;
+		const items: SidebarFooterItem[] = paletteCommands
+			.filter((c) => c.id.startsWith("view-") && c.id !== "view-chat")
+			.map((c) => ({ id: c.id.slice("view-".length), label: c.label, active: c.checked, onSelect: c.run }));
+		const bg = paletteCommands.find((c) => c.id === "bg-tasks");
+		if (bg) items.push({ id: "bg-tasks", label: bg.label, onSelect: bg.run });
+		return <SidebarFooter items={items} onOpenSettings={() => openSettings()} />;
+	}, [minimal, openSettings, paletteCommands]);
+	useEffect(() => {
+		if (!minimal) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key !== ",") return;
+			e.preventDefault();
+			openSettings();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [minimal, openSettings]);
+
 	return (
 		// Whole window is a drop target (issue #19): dragover highlights + any
 		// drop attaches. The plain preventDefault used to merely stop the browser
 		// navigating away; children with their own handlers (input bar / edit
 		// composer) call stopPropagation and keep priority.
 		<div
-			className={`app${zenMode ? " zen-mode" : ""}`}
+			className={`app${zenMode ? " zen-mode" : ""}${minimal ? " shell-minimal" : ""}`}
 			data-pi-anchor="app"
 			onDragOver={(e) => {
 				if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
@@ -2302,36 +2714,56 @@ export function App() {
 					<span>📎 {t("dropHereToAttach")}</span>
 				</div>
 			)}
-			<TopBar
-				chat={chat}
-				terminal={terminal}
-				view={view}
-				plugins={enabledPlugins}
-				uiPrimary={uiPrimary}
-				uiOverflow={uiOverflow}
-				uiContextTopbar={uiSlots["contextmenu.topbar"]}
-				onUiAction={onUiAction}
-				zenMode={zenMode}
-				onToggleZenMode={toggleZenMode}
-				onViewChange={handleViewChange}
-				onOpenPanel={setDrawer}
-				onOpenSettings={() => {
-					setSettingsInitialSection(undefined);
-					setSettingsOpen(true);
-				}}
-				onManagePlugins={() => {
-					setSettingsInitialSection("plugins");
-					setSettingsOpen(true);
-				}}
-				onOpenBgTasks={() => setBgTasksOpen(true)}
-				onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-				onOpenIconEdit={() => setIconEditOpen(true)}
-				onOpenSandboxModal={() => setSandboxModalMode("create")}
-				themes={themes}
-				theme={theme}
-				onThemeChange={switchTheme}
-				reloadThemes={reloadThemes}
-			/>
+			{minimal ? (
+				<MinimalTitleBar
+					chat={chat}
+					view={view}
+					isMobile={isMobile}
+					sidebarOpen={isMobile ? drawer === "left" : !leftCollapsed}
+					onToggleSidebar={toggleSidebar}
+					filesOpen={isMobile ? drawer === "right" : filesOpen}
+					onToggleFiles={toggleFiles}
+					terminalOpen={termDockOpen}
+					onToggleTerminal={toggleTermDock}
+					onOpenPalette={() => setPaletteOpen(true)}
+					onBackToChat={() => handleViewChange("chat")}
+					plugins={enabledPlugins}
+					projectPickerOpen={projectPickerOpen}
+					onProjectPickerOpenChange={setProjectPickerOpen}
+				/>
+			) : (
+				<TopBar
+					chat={chat}
+					terminal={terminal}
+					view={view}
+					plugins={enabledPlugins}
+					uiPrimary={uiPrimary}
+					uiOverflow={uiOverflow}
+					uiContextTopbar={uiSlots["contextmenu.topbar"]}
+					onUiAction={onUiAction}
+					zenMode={zenMode}
+					onToggleZenMode={toggleZenMode}
+					onViewChange={handleViewChange}
+					onOpenPanel={setDrawer}
+					onOpenSettings={() => {
+						setSettingsInitialSection(undefined);
+						setSettingsOpen(true);
+					}}
+					onManagePlugins={() => {
+						setSettingsInitialSection("plugins");
+						setSettingsOpen(true);
+					}}
+					onOpenBgTasks={() => setBgTasksOpen(true)}
+					onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+					onOpenIconEdit={() => setIconEditOpen(true)}
+					onOpenSandboxModal={() => setSandboxModalMode("create")}
+					themes={themes}
+					theme={theme}
+					onThemeChange={switchTheme}
+					reloadThemes={reloadThemes}
+					onSwitchToMinimal={() => setShell("minimal")}
+				/>
+			)}
 			{iconEditOpen && (
 				<IconEditor
 					slots={uiSlots}
@@ -2444,42 +2876,45 @@ export function App() {
 					{/* 悬浮停靠栏是**布局内的贴边槽位**（不再是覆盖一切的 fixed 浮层）：夹在屏幕边缘与
 					    面板之间，面板与主区自动向内让出它的宽度 —— 面板里的按钮再也不会被压住；该侧没有
 					    图标时整条不渲染，连宽度都不占。 */}
-					<SideDock
-						side="left"
-						items={uiSidebarLeft}
-						chat={chat}
-						view={view}
-						plugins={enabledPlugins}
-						dropdownProps={{
-							theme,
-							themes,
-							onThemeChange: switchTheme,
-							reloadThemes,
-						}}
-						onViewChange={handleViewChange}
-						onOpenPanel={setDrawer}
-						onOpenSettings={(sec) => {
-							setSettingsInitialSection(sec as any);
-							setSettingsOpen(true);
-						}}
-						onOpenBgTasks={() => setBgTasksOpen(true)}
-						onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-						onUiAction={onUiAction}
-						uiContextTopbar={uiSlots["contextmenu.topbar"]}
-						onThemeToggle={() => switchTheme(theme === "light" ? null : "light")}
-						onSoundToggle={() => setSound({ ...sound, enabled: !sound.enabled })}
-						zenMode={zenMode}
-						onToggleZenMode={toggleZenMode}
-					/>
+					{!minimal && (
+						<SideDock
+							side="left"
+							items={uiSidebarLeft}
+							chat={chat}
+							view={view}
+							plugins={enabledPlugins}
+							dropdownProps={{
+								theme,
+								themes,
+								onThemeChange: switchTheme,
+								reloadThemes,
+							}}
+							onViewChange={handleViewChange}
+							onOpenPanel={setDrawer}
+							onOpenSettings={(sec) => {
+								setSettingsInitialSection(sec as any);
+								setSettingsOpen(true);
+							}}
+							onOpenBgTasks={() => setBgTasksOpen(true)}
+							onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+							onUiAction={onUiAction}
+							uiContextTopbar={uiSlots["contextmenu.topbar"]}
+							onThemeToggle={() => switchTheme(theme === "light" ? null : "light")}
+							onSoundToggle={() => setSound({ ...sound, enabled: !sound.enabled })}
+							zenMode={zenMode}
+							onToggleZenMode={toggleZenMode}
+						/>
+					)}
 					<div className={`view-pane ${view === "chat" ? "" : "hidden"}`}>
-						{!isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
+						{!minimal && !isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
 						<div
 							className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${
 								isMobile ? "" : leftCollapsed ? " hidden" : ""
 							}`}
 						>
 							<LeftPanel
-								collapsible={!isMobile}
+								collapsible={!isMobile && !minimal}
+								footer={sidebarFooter}
 								onToggleCollapse={toggleLeft}
 								panelSend={panelSend}
 								active={!isMobile || drawer === "left"}
@@ -3001,18 +3436,42 @@ export function App() {
 										sessionId={chat.state?.sessionId ?? ""}
 										preserveDraftAcrossConversations={chat.settings?.preserveDraftAcrossConversations ?? false}
 									/>
+									{minimal && (
+										<ComposerStatusLine
+											chat={chat}
+											view={view}
+											primary={statusLine.primary}
+											extra={statusLine.extra}
+											itemProps={{
+												plugins: enabledPlugins,
+												onViewChange: handleViewChange,
+												onOpenPanel: openPanelMinimal,
+												onOpenSettings: openSettings,
+												onOpenGlobalSearch: () => setGlobalSearchOpen(true),
+												onOpenBgTasks: () => setBgTasksOpen(true),
+												onOpenProjectPicker: () => setProjectPickerOpen(true),
+												onOpenSandboxModal: () => setSandboxModalMode("create"),
+												onUiAction,
+												uiContextEntries: uiSlots["contextmenu.topbar"],
+												zenMode,
+												onToggleZenMode: toggleZenMode,
+											}}
+										/>
+									)}
 								</>
 							)}
 						</main>
-						{!isMobile && !rightCollapsed && <ResizeHandle side="right" width={rightWidth} onResize={resizeRight} />}
+						{!isMobile && !(minimal ? !filesOpen : rightCollapsed) && (
+							<ResizeHandle side="right" width={rightWidth} onResize={resizeRight} />
+						)}
 						<div
 							className={`panel-drawer drawer-right ${drawer === "right" ? "open" : ""}${
-								isMobile ? "" : rightCollapsed ? " hidden" : ""
+								isMobile ? "" : (minimal ? !filesOpen : rightCollapsed) ? " hidden" : ""
 							}`}
 						>
 							<RightPanel
 								collapsible={!isMobile}
-								onToggleCollapse={toggleRight}
+								onToggleCollapse={minimal ? toggleFiles : toggleRight}
 								panelSend={panelSend}
 								files={chat.files}
 								fileChanged={chat.fileChanged}
@@ -3035,18 +3494,20 @@ export function App() {
 								send={send}
 							/>
 						</div>
-						{!isMobile && rightCollapsed && <PanelRail side="right" onClick={toggleRight} />}
+						{!minimal && !isMobile && rightCollapsed && <PanelRail side="right" onClick={toggleRight} />}
 					</div>
-					<div className={`view-pane ${view === "terminal" ? "" : "hidden"}`}>
-						<DeferredMount active={view === "terminal"}>
-							<TerminalPanel
-								chat={chat}
-								terminal={terminal}
-								uiTerminalToolbar={uiTerminalToolbar}
-								onUiAction={onUiAction}
-							/>
-						</DeferredMount>
-					</div>
+					{!minimal && (
+						<div className={`view-pane ${view === "terminal" ? "" : "hidden"}`}>
+							<DeferredMount active={view === "terminal"}>
+								<TerminalPanel
+									chat={chat}
+									terminal={terminal}
+									uiTerminalToolbar={uiTerminalToolbar}
+									onUiAction={onUiAction}
+								/>
+							</DeferredMount>
+						</div>
+					)}
 					<div className={`view-pane ${view === "git" ? "" : "hidden"}`}>
 						<DeferredMount active={view === "git"}>
 							<ScmPanel
@@ -3113,47 +3574,86 @@ export function App() {
 							failed={failedPluginViews.includes(view.slice("plugin:".length))}
 						/>
 					)}
-					<SideDock
-						side="right"
-						items={uiSidebarRight}
-						chat={chat}
-						view={view}
-						plugins={enabledPlugins}
-						dropdownProps={{
-							theme,
-							themes,
-							onThemeChange: switchTheme,
-							reloadThemes,
-						}}
-						onViewChange={handleViewChange}
-						onOpenPanel={setDrawer}
-						onOpenSettings={(sec) => {
-							setSettingsInitialSection(sec as any);
-							setSettingsOpen(true);
-						}}
-						onOpenBgTasks={() => setBgTasksOpen(true)}
-						onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-						onUiAction={onUiAction}
-						uiContextTopbar={uiSlots["contextmenu.topbar"]}
-						onThemeToggle={() => switchTheme(theme === "light" ? null : "light")}
-						onSoundToggle={() => setSound({ ...sound, enabled: !sound.enabled })}
-						zenMode={zenMode}
-						onToggleZenMode={toggleZenMode}
-					/>
+					{!minimal && (
+						<SideDock
+							side="right"
+							items={uiSidebarRight}
+							chat={chat}
+							view={view}
+							plugins={enabledPlugins}
+							dropdownProps={{
+								theme,
+								themes,
+								onThemeChange: switchTheme,
+								reloadThemes,
+							}}
+							onViewChange={handleViewChange}
+							onOpenPanel={setDrawer}
+							onOpenSettings={(sec) => {
+								setSettingsInitialSection(sec as any);
+								setSettingsOpen(true);
+							}}
+							onOpenBgTasks={() => setBgTasksOpen(true)}
+							onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+							onUiAction={onUiAction}
+							uiContextTopbar={uiSlots["contextmenu.topbar"]}
+							onThemeToggle={() => switchTheme(theme === "light" ? null : "light")}
+							onSoundToggle={() => setSound({ ...sound, enabled: !sound.enabled })}
+							zenMode={zenMode}
+							onToggleZenMode={toggleZenMode}
+						/>
+					)}
 				</div>
+				{minimal && (
+					<TerminalDock open={termDockOpen} onClose={() => setTermDockOpen(false)}>
+						<TerminalPanel
+							chat={chat}
+							terminal={terminal}
+							uiTerminalToolbar={uiTerminalToolbar}
+							onUiAction={onUiAction}
+						/>
+					</TerminalDock>
+				)}
 			</TemplateProvider>
-			<FooterBar
-				chat={chat}
-				bottombarItems={uiSlots["bottombar"]}
-				onUiAction={onUiAction}
-				onOpenSettings={() => {
-					setSettingsInitialSection(undefined);
-					setSettingsOpen(true);
-				}}
-				onViewChange={handleViewChange}
-				onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-				onOpenBgTasks={() => setBgTasksOpen(true)}
-			/>
+			{!minimal && (
+				<FooterBar
+					chat={chat}
+					bottombarItems={uiSlots["bottombar"]}
+					onUiAction={onUiAction}
+					onOpenSettings={() => {
+						setSettingsInitialSection(undefined);
+						setSettingsOpen(true);
+					}}
+					onViewChange={handleViewChange}
+					onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+					onOpenBgTasks={() => setBgTasksOpen(true)}
+				/>
+			)}
+			{minimal && (
+				<CommandPalette
+					open={paletteOpen}
+					commands={paletteCommands}
+					onClose={() => setPaletteOpen(false)}
+					onSearch={(q) => {
+						setSearchSeed({ text: q, nonce: Date.now() });
+						setGlobalSearchOpen(true);
+					}}
+				/>
+			)}
+			{localeModalOpen && <LocaleModal onClose={() => setLocaleModalOpen(false)} />}
+			{updateModalOpen && (
+				<Modal
+					onClose={() => setUpdateModalOpen(false)}
+					title={t("update")}
+					className="update-modal"
+					ariaLabel={t("update")}
+				>
+					<div className="modal-body update-modal-body" data-testid="update-modal">
+						{updatePanel.renderUpdateBody()}
+						{updatePanel.renderAllUpdatesBody()}
+					</div>
+				</Modal>
+			)}
 			{previewFile && (
 				<Suspense fallback={null}>
 					<FilePreview
@@ -3299,6 +3799,7 @@ export function App() {
 					onPreviewFile={(path, name) => {
 						openFile(path, name);
 					}}
+					seedQuery={searchSeed}
 				/>
 			</DeferredMount>
 			{pluginDirPicker && (
