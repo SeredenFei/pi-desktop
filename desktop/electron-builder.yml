@@ -32,7 +32,7 @@ npmRebuild: false
 # 避免 electron-builder 直推与 release-notes.yml 打架），feed 文件照常生成。
 publish:
   provider: github
-  owner: xing-shuyin
+  owner: feifeifei527
   repo: pi-web-ui
 win:
   target:
