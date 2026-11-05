@@ -42,6 +42,9 @@ win:
 mac:
   # dmg 给人手装，zip 给 electron-updater 原地更新（Squirrel.Mac 只吃 zip，
   # issue #180A：以前只有 dmg，latest-mac.yml 即使接上 updater 也生效不了）。
+  # identity: "-" 强制对整个 .app（含 asar:false 下的 node-pty 原生 .node 与 spawn-helper）
+  # 执行统一 ad-hoc 签名，避免内部二进制与主包签名不一致导致 macOS Gatekeeper 报「已损坏」。
+  identity: "-"
   target:
     - dmg
     - zip

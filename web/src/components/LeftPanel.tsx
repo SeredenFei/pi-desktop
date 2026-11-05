@@ -2279,7 +2279,9 @@ export const LeftPanel = memo(function LeftPanel({
 										const pRawSessions = active
 											? sessions
 											: (pStateSessions ?? readCachedSessions(p.path, engine) ?? []);
-										const isLoadingSessions = loadingProjects.has(pNorm) && pRawSessions.length === 0;
+										// 只要服务端已返回过该项目的 projectSessions（哪怕是空数组 []），加载即已完成，不再永久显示「正在读取会话…」
+										const isLoadingSessions =
+											loadingProjects.has(pNorm) && pStateSessions === undefined && pRawSessions.length === 0;
 
 										// 3. 最佳落地实践：物理路径确定性归属过滤 + 全局排他去重
 										// 任何物理路径不属于当前项目的会话，一律在物理层被拒收，绝不可能跨项目窜门
@@ -2337,7 +2339,8 @@ export const LeftPanel = memo(function LeftPanel({
 														disabled={switching}
 														onClick={() => {
 															if (!switching) {
-																if (!active) panelSend({ type: "set_cwd", path: p.path });
+																// 单击项目行只秒速展开/折叠该项目的历史会话（几毫秒），不触发耗时数秒的 set_cwd 重建智能体 Runtime；
+																// 点击项目下的具体会话、双击项目行或点右侧 + 新建对话时才切换工作区。
 																toggleProjectExpand(p.path);
 															}
 														}}

@@ -15848,11 +15848,23 @@ export class ClientSession {
 		// 元数据，写回会把 A 客户端的视图固化给 B（静态缓存跨客户端共享）；
 		// 底层超过 TTL 后后台重扫一次，磁盘上新工作区不会被永久挡在列表外。
 		if (cached) {
-			this.emit({ type: "projects", projects: this.withCurrentCwd(cached.projects, now) });
+			const list = this.withCurrentCwd(cached.projects, now);
+			this.emit({ type: "projects", projects: list });
+			this.prewarmTopProjectSessions(list);
 			if (now - cached.at >= ClientSession.PROJECTS_CACHE_TTL) void this.ensureProjectsCache(false);
 			return;
 		}
 		await this.ensureProjectsCache(true);
+	}
+
+	/** 后台预热前几个最近项目的会话列表缓存并下发：用户点开项目即 0ms 呈现，无需等磁盘扫描。 */
+	private prewarmTopProjectSessions(projects: ProjectSummary[]): void {
+		const curKey = normalizePathKey(this.cwd);
+		for (const p of projects.slice(0, 6)) {
+			const key = normalizePathKey(p.path);
+			if (!key || key === curKey) continue;
+			void this.pushSessionsForCwd(p.path);
+		}
 	}
 
 	/**
@@ -15885,7 +15897,9 @@ export class ClientSession {
 				const merged = await this.stateStore.getRecentProjects(this.clientId);
 				ClientSession.projectsCache = { at: Date.now(), projects: merged };
 				if (emitResult) {
-					this.emit({ type: "projects", projects: this.withCurrentCwd(merged, Date.now()) });
+					const list = this.withCurrentCwd(merged, Date.now());
+					this.emit({ type: "projects", projects: list });
+					this.prewarmTopProjectSessions(list);
 				}
 				return merged;
 			} catch {

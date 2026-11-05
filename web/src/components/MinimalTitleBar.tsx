@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { FiArrowLeft, FiChevronDown, FiCommand, FiFolder, FiMenu, FiSidebar, FiTerminal } from "react-icons/fi";
 import { appSend, useAppField } from "../app-globals";
+import { appUrl } from "../base-url";
 import { useT } from "../i18n";
 import type { UiSlotEntry } from "../ui-slots";
 import type { ChatState } from "../use-chat";
@@ -89,6 +90,14 @@ export function MinimalTitleBar({
 	return (
 		<header className={`mtb${isMac ? " mtb-mac" : ""}`} data-testid="minimal-titlebar">
 			<div className="mtb-left">
+				<img
+					className="mtb-logo"
+					src={appUrl("/favicon.svg")}
+					alt="pi-web-ui"
+					width={20}
+					height={20}
+					draggable={false}
+				/>
 				<button
 					type="button"
 					className={`mtb-btn${sidebarOpen ? " on" : ""}`}

@@ -200,13 +200,21 @@ async function startServerSidecar(): Promise<string> {
 	return url;
 }
 
+function resolveWindowIcon(): string | undefined {
+	const rel = join("web", "dist", "icons", "icon-1024.png");
+	const p = app.isPackaged ? join(app.getAppPath(), rel) : join(here, "..", "..", rel);
+	return existsSync(p) ? p : undefined;
+}
+
 async function createWindow(url: string): Promise<void> {
+	const icon = resolveWindowIcon();
 	mainWin = new BrowserWindow({
 		width: 1280,
 		height: 860,
 		minWidth: 800,
 		minHeight: 600,
 		autoHideMenuBar: true,
+		...(icon && process.platform !== "darwin" ? { icon } : {}),
 		// 自定义沉浸式标题栏：隐藏系统通用标题栏，使用无边框沉浸式窗口
 		titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
 		trafficLightPosition: process.platform === "darwin" ? { x: 12, y: 15 } : undefined,

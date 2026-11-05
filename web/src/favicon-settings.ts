@@ -244,6 +244,19 @@ export function loadFaviconSettings(): FaviconSettings {
 /** 应用当前配置到浏览器标签页 */
 export function applyFavicon(): void {
 	const settings = cached ?? loadFaviconSettings();
+	if (settings.color === "default" && !serverConfig.faviconColor) {
+		if (typeof document !== "undefined") {
+			let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+			if (!link) {
+				link = document.createElement("link");
+				link.rel = "icon";
+				document.head.appendChild(link);
+			}
+			link.type = "image/svg+xml";
+			link.href = appUrl("/favicon.svg");
+		}
+		return;
+	}
 	const host = typeof window !== "undefined" ? window.location.host : "";
 	const color = resolveFaviconColor(settings, host);
 	updateFavicon(color);

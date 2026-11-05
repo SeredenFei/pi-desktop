@@ -1,8 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- pi symbol favicon: violet rounded square + white π (drawn as paths,
-       no font dependency) -->
-  <rect width="64" height="64" rx="14" fill="#8b5cf6"/>
-  <rect x="14" y="17" width="36" height="6.5" rx="3.25" fill="#ffffff"/>
-  <rect x="17.5" y="23.5" width="6.5" height="25" rx="3.25" fill="#ffffff"/>
-  <rect x="40" y="23.5" width="6.5" height="25" rx="3.25" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <pattern id="grid" width="16" height="16" patternUnits="userSpaceOnUse">
+      <path d="M 16 0 L 0 0 0 16" fill="none" stroke="#dedad6" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <!-- Warm grid canvas background (#ece8e5) -->
+  <rect width="256" height="256" rx="52" fill="#ece8e5"/>
+  <rect width="256" height="256" rx="52" fill="url(#grid)" opacity="0.65"/>
+  <!-- 4x4 tetromino Pi / Fi mark (cell = 40px, origin = 48,48) -->
+  <!-- Coral-pink L (#f09082): (0,0)-(2,0) + (2,1) -->
+  <path d="M48 48 H168 V128 H128 V88 H48 Z" fill="#f09082"/>
+  <!-- Blue-teal T (#4d9abf): (0,1)-(0,3) + (1,2) -->
+  <path d="M48 88 H88 V128 H128 V168 H88 V208 H48 Z" fill="#4d9abf"/>
+  <!-- Warm-yellow I (#f1be58): (3,2)-(3,3) -->
+  <rect x="168" y="128" width="40" height="80" fill="#f1be58"/>
 </svg>
