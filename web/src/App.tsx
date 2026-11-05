@@ -554,11 +554,26 @@ export function App() {
 		}
 	}, []);
 	const activeSessionKey = chat.state?.sessionId || chat.activeConversationId || chat.state?.conversationId || "";
-	const { memory, setMemory, toggleIsolated, createChatProject } = useMemoryState(
+	const { memory, setMemory, refreshMemory, toggleIsolated, createChatProject, deleteChatProject } = useMemoryState(
 		cwd,
 		activeSessionKey,
 		memoryModalOpen,
 	);
+	const prevStreamingRef = useRef<boolean>(false);
+	useEffect(() => {
+		const isStr = Boolean(chat.state?.isStreaming);
+		if (prevStreamingRef.current && !isStr) {
+			// 一轮对话完成：刷新记忆与云同步状态（首次 600ms 拿到新提取的记忆/对话，2200ms 拿到自动云同步结果）
+			const t1 = setTimeout(() => void refreshMemory(), 600);
+			const t2 = setTimeout(() => void refreshMemory(), 2200);
+			prevStreamingRef.current = isStr;
+			return () => {
+				clearTimeout(t1);
+				clearTimeout(t2);
+			};
+		}
+		prevStreamingRef.current = isStr;
+	}, [chat.state?.isStreaming, refreshMemory]);
 	const refreshWorktrees = useCallback(() => send({ type: "refresh_worktrees" }), [send]);
 	useWorktreeRefresh(chat.state?.worktree?.mainPath, refreshWorktrees);
 	const pendingWorktreeSwitch = useRef<{ source: string; target: string } | null>(null);
@@ -2707,58 +2722,150 @@ export function App() {
 		termDockOpen,
 		isMobile,
 	]);
+	const normModePath = useCallback((p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase(), []);
+	const isChatPath = useCallback(
+		(p: string) => {
+			const np = normModePath(p);
+			if (!np) return false;
+			const chatSpaceNorm = memory.view?.chatSpaceCwd ? normModePath(memory.view.chatSpaceCwd) : "";
+			if (chatSpaceNorm && (np === chatSpaceNorm || np.startsWith(`${chatSpaceNorm}/`))) return true;
+			const chatRootNorm = memory.view?.chatProjectsRoot ? normModePath(memory.view.chatProjectsRoot) : "";
+			if (chatRootNorm && (np === chatRootNorm || np.startsWith(`${chatRootNorm}/`))) return true;
+			return np.includes("/chat-projects/") || np.endsWith("/chat-space");
+		},
+		[normModePath, memory.view?.chatSpaceCwd, memory.view?.chatProjectsRoot],
+	);
+
+	// 分别记忆 Chat 与 Work 各自最后停留的目录，切模式时互不串台
+	useEffect(() => {
+		if (!cwd) return;
+		try {
+			if (isChatPath(cwd)) {
+				localStorage.setItem("pi-web-ui:last-chat-cwd", cwd);
+			} else {
+				localStorage.setItem("pi-web-ui:last-work-cwd", cwd);
+			}
+		} catch {
+			/* ignore */
+		}
+	}, [cwd, isChatPath]);
+
+	// 监听侧边栏移除项目事件：若移除的是 Chat 话题项目，同步从 MemoryStore 清理并刷新
+	useEffect(() => {
+		const onProjectRemoved = (ev: Event) => {
+			const detail = (ev as CustomEvent<{ path?: string }>).detail;
+			const removedPath = detail?.path;
+			if (!removedPath) return;
+			try {
+				if (localStorage.getItem("pi-web-ui:last-chat-cwd") === removedPath) {
+					localStorage.removeItem("pi-web-ui:last-chat-cwd");
+				}
+				if (localStorage.getItem("pi-web-ui:last-work-cwd") === removedPath) {
+					localStorage.removeItem("pi-web-ui:last-work-cwd");
+				}
+			} catch {
+				/* ignore */
+			}
+			if (isChatPath(removedPath)) {
+				void deleteChatProject(removedPath);
+			} else {
+				void refreshMemory();
+			}
+		};
+		window.addEventListener("pi-web-ui:project-removed", onProjectRemoved);
+		return () => window.removeEventListener("pi-web-ui:project-removed", onProjectRemoved);
+	}, [isChatPath, deleteChatProject, refreshMemory]);
+
 	const sidebarProjects = useMemo(() => {
 		if (!minimal) return chat.projects;
-		const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-		const chatSpaceNorm = memory.view?.chatSpaceCwd ? norm(memory.view.chatSpaceCwd) : "";
-		const chatProjNorms = new Set((memory.view?.chatProjects ?? []).map((cp) => norm(cp.path)));
-		const isChatPath = (p: string) => {
-			const np = norm(p);
-			if (!np) return false;
-			if (chatSpaceNorm && np === chatSpaceNorm) return true;
-			if (chatProjNorms.has(np)) return true;
-			return np.includes("/chat-projects/") || np.endsWith("/chat-space");
-		};
 		if (sidebarMode === "chat") {
-			const byNorm = new Map<string, (typeof chat.projects)[number]>();
-			if (memory.view?.chatSpaceCwd) {
-				byNorm.set(chatSpaceNorm, { path: memory.view.chatSpaceCwd, lastUsed: Date.now() + 1 });
-			}
-			for (const cp of memory.view?.chatProjects ?? []) {
-				byNorm.set(norm(cp.path), { path: cp.path, lastUsed: cp.updatedAt || Date.now() });
-			}
-			for (const p of chat.projects) {
-				if (isChatPath(p.path) && !byNorm.has(norm(p.path))) {
-					byNorm.set(norm(p.path), p);
+			if (memory.view) {
+				const byNorm = new Map<string, (typeof chat.projects)[number]>();
+				if (memory.view.chatSpaceCwd) {
+					byNorm.set(normModePath(memory.view.chatSpaceCwd), {
+						path: memory.view.chatSpaceCwd,
+						lastUsed: Date.now() + 1,
+					});
 				}
+				for (const cp of memory.view.chatProjects ?? []) {
+					byNorm.set(normModePath(cp.path), {
+						path: cp.path,
+						lastUsed: cp.updatedAt || Date.now(),
+					});
+				}
+				return [...byNorm.values()];
 			}
-			return [...byNorm.values()];
+			return chat.projects.filter((p) => isChatPath(p.path));
 		}
 		return chat.projects.filter((p) => !isChatPath(p.path));
-	}, [minimal, sidebarMode, chat.projects, memory.view?.chatSpaceCwd, memory.view?.chatProjects]);
+	}, [minimal, sidebarMode, chat.projects, memory.view, normModePath, isChatPath]);
+
+	const sidebarConversations = useMemo(() => {
+		if (!minimal) return chat.conversations;
+		return chat.conversations.filter((c) => !c.cwd || isChatPath(c.cwd) === (sidebarMode === "chat"));
+	}, [minimal, chat.conversations, isChatPath, sidebarMode]);
+
+	const sidebarElsewhere = useMemo(() => {
+		if (!minimal) return chat.elsewhere;
+		return chat.elsewhere.filter((e) => !e.cwd || isChatPath(e.cwd) === (sidebarMode === "chat"));
+	}, [minimal, chat.elsewhere, isChatPath, sidebarMode]);
 
 	const handleModeChange = useCallback(
 		(nextMode: "chat" | "work") => {
 			setSidebarMode(nextMode);
 			handleViewChange("chat");
 			if (nextMode === "chat") {
-				const target = memory.view?.chatSpaceCwd;
-				if (target && cwd !== target && !cwd.replace(/\\/g, "/").includes("/chat-projects/")) {
+				if (cwd && isChatPath(cwd)) return;
+				let target = memory.view?.chatSpaceCwd;
+				try {
+					const savedChat = localStorage.getItem("pi-web-ui:last-chat-cwd");
+					if (savedChat && isChatPath(savedChat)) {
+						const validInList =
+							(memory.view?.chatSpaceCwd && normModePath(savedChat) === normModePath(memory.view.chatSpaceCwd)) ||
+							(memory.view?.chatProjects ?? []).some((cp) => normModePath(cp.path) === normModePath(savedChat));
+						if (validInList) target = savedChat;
+					}
+				} catch {
+					/* ignore */
+				}
+				if (target && normModePath(cwd) !== normModePath(target)) {
 					send({ type: "set_cwd", path: target });
 				}
 			} else {
-				const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-				const chatSpaceNorm = memory.view?.chatSpaceCwd ? norm(memory.view.chatSpaceCwd) : "";
-				const workProj = chat.projects.find((p) => {
-					const np = norm(p.path);
-					return np !== chatSpaceNorm && !np.includes("/chat-projects/") && !np.endsWith("/chat-space");
-				});
-				if (workProj && norm(cwd) !== norm(workProj.path)) {
-					send({ type: "set_cwd", path: workProj.path });
+				if (cwd && !isChatPath(cwd)) return;
+				let target: string | undefined;
+				try {
+					const savedWork = localStorage.getItem("pi-web-ui:last-work-cwd");
+					if (savedWork && !isChatPath(savedWork)) {
+						const existsInWork = chat.projects.some(
+							(p) => !isChatPath(p.path) && normModePath(p.path) === normModePath(savedWork),
+						);
+						if (existsInWork) target = savedWork;
+					}
+				} catch {
+					/* ignore */
+				}
+				if (!target) {
+					const workProj = chat.projects.find((p) => !isChatPath(p.path));
+					target = workProj?.path || memory.view?.workProjectsRoot;
+				}
+				if (target && normModePath(cwd) !== normModePath(target)) {
+					send({ type: "set_cwd", path: target });
 				}
 			}
 		},
-		[setSidebarMode, handleViewChange, memory.view?.chatSpaceCwd, cwd, chat.projects, send],
+		[
+			setSidebarMode,
+			handleViewChange,
+			cwd,
+			isChatPath,
+			normModePath,
+			memory.view?.chatSpaceCwd,
+			memory.view?.chatProjects,
+			memory.view?.workProjectsRoot,
+			chat.projects,
+			send,
+		],
 	);
 
 	// Cmd/Ctrl+,  打开设置（极简外壳没有常驻设置按钮）
@@ -3081,14 +3188,14 @@ export function App() {
 								headerSlot={sidebarHeader}
 								footer={sidebarFooter}
 								singleProjectFocus={minimal}
-								onExitProject={() => enterChatSpace()}
+								sidebarMode={minimal ? sidebarMode : undefined}
 								onToggleCollapse={toggleLeft}
 								panelSend={panelSend}
 								active={!isMobile || drawer === "left"}
 								unreadConvKeys={unreadConvKeys}
 								sessionFile={activeGroupId ? null : (chat.state?.sessionFile ?? null)}
-								conversations={chat.conversations}
-								elsewhere={chat.elsewhere}
+								conversations={sidebarConversations}
+								elsewhere={sidebarElsewhere}
 								sessions={chat.sessions}
 								projects={sidebarProjects}
 								projectSessions={chat.projectSessions}
@@ -3818,7 +3925,19 @@ export function App() {
 					onClose={() => setMemoryModalOpen(false)}
 					onSwitchCwd={(targetCwd) => {
 						setMemoryModalOpen(false);
+						setSidebarMode(isChatPath(targetCwd) ? "chat" : "work");
 						send({ type: "set_cwd", path: targetCwd });
+					}}
+					onOpenTranscript={(targetCwd, filePath, targetSessionId) => {
+						setMemoryModalOpen(false);
+						setSidebarMode("chat");
+						handleViewChange("chat");
+						if (normModePath(cwd) !== normModePath(targetCwd)) {
+							send({ type: "set_cwd", path: targetCwd });
+						}
+						setTimeout(() => {
+							send({ type: "switch_session", path: filePath, sessionId: targetSessionId });
+						}, 150);
 					}}
 				/>
 			)}

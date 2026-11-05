@@ -216,8 +216,46 @@ async function main() {
 	);
 	await page.click('[data-testid="toggle-memory-isolated"]');
 	await sleep(200);
+	await page.click('[data-testid="mem-tab-sync"]');
+	await sleep(200);
+	check("云同步标签页展示已同步数据总览面板", await page.isVisible('[data-testid="mem-sync-overview"]'));
 	await page.keyboard.press("Escape");
 	await sleep(200);
+
+	console.log("8.6. Chat / Work 双模式物理隔离、直觉化新建与一键删除项目验证");
+	await page.click('[data-testid="mode-tab-chat"]');
+	await sleep(300);
+	// 在 Chat 模式下点击「项目」标题栏右侧的 + 按钮，应直接弹出新建 Chat 项目输入框（而不是本地目录选择器）
+	await page.click(".lp-project-action");
+	await page.waitForSelector('[data-testid="new-chat-project-input"]', { timeout: 3000 });
+	check("Chat 模式下点击项目栏 + 号直接呼出新建 Chat 项目输入框", true);
+	await page.fill('[data-testid="new-chat-project-input"]', "RL-Study");
+	await page.keyboard.press("Enter");
+	await sleep(500);
+	const chatProjNames = await page.locator(".lp-project-name"). allTextContents();
+	check("新建 Chat 项目 RL-Study 立即出现在 Chat 列表", chatProjNames.some((n) => n.includes("RL-Study")), chatProjNames);
+
+	// 切换到 Work 模式，验证 RL-Study 与 💬 独立对话 绝不串台到 Work 列表
+	await page.click('[data-testid="mode-tab-work"]');
+	await sleep(400);
+	const workProjNames = await page.locator(".lp-project-name").allTextContents();
+	check(
+		"切换到 Work 模式后，Chat 项目与独立对话绝不串台出现",
+		!workProjNames.some((n) => n.includes("RL-Study") || n.includes("独立对话")),
+		workProjNames,
+	);
+
+	// 切回 Chat 模式，验证删除当前正在打开的 RL-Study 项目能够立即删除且不复活
+	await page.click('[data-testid="mode-tab-chat"]');
+	await sleep(400);
+	const delBtn = page.locator('[data-testid="delete-project-RL-Study"]');
+	await delBtn.click();
+	await sleep(150);
+	check("第一次点击垃圾桶出现醒目的「确认删除」按钮", (await delBtn.textContent())?.includes("确认删除"));
+	await delBtn.click();
+	await sleep(500);
+	const afterDelNames = await page.locator(".lp-project-name").allTextContents();
+	check("点击「确认删除」后当前激活的 RL-Study 项目立即彻底移除且不复活", !afterDelNames.some((n) => n.includes("RL-Study")), afterDelNames);
 
 	console.log("9. 手机宽度");
 	await page.setViewportSize({ width: 390, height: 800 });

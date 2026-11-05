@@ -58,6 +58,8 @@ import { SandboxManager } from "../sandbox-service.js";
 import { assertEngineWorkspaceSupported } from "../sandbox-engines.js";
 import { getWorktreeContext, removeWorktree } from "../worktree-service.js";
 import { MarkerService } from "../marker-service.js";
+import { getMemoryStore, isChatWorkspacePath, resolveChatSpaceDir } from "../memory-store.js";
+import { normalizePathKey } from "../client-state.js";
 import { SlashCommandsService, parseSlash } from "../slash-commands.js";
 import { discoverDiskSkills, readSkillInstruction, type DiscoveredSkill } from "../skill-discovery.js";
 import { scanAtMentions, createAttachmentUiMessages, formatPromptWithSkills } from "./universal-attachments.js";
@@ -1586,7 +1588,19 @@ export class UniversalSession implements DispatchSession {
 
 	async removeProject(path: string): Promise<void> {
 		if (typeof this.stateStore?.removeProject !== "function") return;
+		const dataDir = this.stateStore.dataDir;
+		const mem = getMemoryStore(dataDir);
+		const wasChat = dataDir ? isChatWorkspacePath(dataDir, path) : false;
+		const targetNorm = normalizePathKey(path);
+		const deletingCurrent = normalizePathKey(this.cwd) === targetNorm;
 		this.stateStore.removeProject(this.clientId, path);
+		mem?.deleteProjectByCwd(path);
+		if (deletingCurrent) {
+			const fallback = wasChat && dataDir ? resolveChatSpaceDir(dataDir) : homedir();
+			if (normalizePathKey(fallback) !== targetNorm) {
+				await this.setCwd(fallback);
+			}
+		}
 		await this.pushProjects();
 	}
 

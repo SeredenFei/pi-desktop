@@ -1041,7 +1041,28 @@ app.post("/api/memory/instructions", express.json({ limit: "64kb" }), (req, res)
 
 app.post("/api/memory/chat-project", express.json({ limit: "64kb" }), (req, res) => {
 	try {
-		const body = (req.body ?? {}) as { name?: string; instructions?: string; sessionId?: string };
+		const body = (req.body ?? {}) as {
+			op?: "create" | "delete";
+			path?: string;
+			slug?: string;
+			name?: string;
+			instructions?: string;
+			sessionId?: string;
+			cwd?: string;
+		};
+		if (body.op === "delete") {
+			const target = String(body.path ?? "").trim();
+			if (target) {
+				memoryStore.deleteProjectByCwd(target);
+				sharedStateStore.removeProject("", target);
+			}
+			const fallbackCwd =
+				typeof body.cwd === "string" && body.cwd.trim() && body.cwd.trim() !== target
+					? body.cwd.trim()
+					: memoryStore.getView(CWD).chatSpaceCwd;
+			res.json(buildMemoryResponse(fallbackCwd, body.sessionId));
+			return;
+		}
 		const created = memoryStore.createChatProject(String(body.name ?? ""), String(body.instructions ?? ""));
 		res.json({
 			...buildMemoryResponse(created.path, body.sessionId),

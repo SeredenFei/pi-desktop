@@ -11,7 +11,8 @@
  * 4. 渲染注入系统提示词的 <user_memory> XML 片段。
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { normalizePathKey } from "./client-state.js";
@@ -46,6 +47,8 @@ export interface ProjectMemoryBucket {
 	isChatProject?: boolean;
 	/** 话题项目的 slug（用于跨端自动恢复本地虚拟目录）。 */
 	slug?: string;
+	/** 软删除墓碑时间戳：删除项目后跨端合并时防止被旧副本复活。 */
+	deletedAt?: number;
 	updatedAt: number;
 	items: MemoryItem[];
 }
@@ -71,8 +74,22 @@ export interface MemoryDocument {
 	chatTranscripts?: Record<string, SyncedChatTranscript>;
 }
 
+export interface SyncedTranscriptSummary {
+	sessionId: string;
+	fileName: string;
+	title: string;
+	scopeKey: string;
+	scopeName: string;
+	cwd: string;
+	filePath: string;
+	messageCount: number;
+	updatedAt: number;
+}
+
 export interface MemorySnapshotView {
 	chatSpaceCwd: string;
+	chatProjectsRoot: string;
+	workProjectsRoot: string;
 	isChatSpace: boolean;
 	projectKey: string;
 	projectName: string;
@@ -87,6 +104,7 @@ export interface MemorySnapshotView {
 		itemCount: number;
 		updatedAt: number;
 	}[];
+	syncedTranscripts: SyncedTranscriptSummary[];
 }
 
 function emptyDocument(): MemoryDocument {
@@ -130,15 +148,19 @@ export function resolveProjectMemoryIdentity(
 	cwd: string,
 ): { projectKey: string; name: string; isChatSpace: boolean; chatProjectSlug?: string } {
 	const chatSpace = resolveChatSpaceDir(dataDir);
-	const normCwd = normalizePathKey(resolve(cwd));
-	if (normCwd === normalizePathKey(chatSpace)) {
+	const normCwd = normalizePathKey(resolve(cwd)).replace(/\\/g, "/").replace(/\/+$/, "");
+	const normSpace = normalizePathKey(chatSpace).replace(/\\/g, "/").replace(/\/+$/, "");
+	if (normCwd === normSpace) {
 		return { projectKey: "chat-space", name: "Chats", isChatSpace: true };
 	}
 	const chatProjectsRoot = resolveChatProjectsRoot(dataDir);
-	const normRoot = normalizePathKey(chatProjectsRoot);
+	const normRoot = normalizePathKey(chatProjectsRoot).replace(/\\/g, "/").replace(/\/+$/, "");
 	if (normCwd.startsWith(`${normRoot}/`)) {
-		const rel = normCwd.slice(normRoot.length + 1);
-		const slug = rel.split("/")[0] || "project";
+		const resolvedCwd = resolve(cwd).replace(/\\/g, "/");
+		const resolvedRoot = resolve(chatProjectsRoot).replace(/\\/g, "/").replace(/\/+$/, "");
+		const rawRel = resolvedCwd.slice(resolvedRoot.length + 1);
+		const rawSlug = rawRel.split("/")[0] || "project";
+		const slug = sanitizeProjectSlug(rawSlug);
 		return {
 			projectKey: `chat-project:${slug}`,
 			name: slug,
@@ -172,6 +194,29 @@ export function resolveChatProjectsRoot(dataDir: string): string {
 		/* ignore */
 	}
 	return dir;
+}
+
+export function resolveWorkProjectsRoot(dataDir: string): string {
+	const homeProjects = resolve(homedir(), "projects");
+	if (existsSync(homeProjects)) return homeProjects;
+	const dir = resolve(dataDir, "work-projects");
+	try {
+		mkdirSync(dir, { recursive: true });
+	} catch {
+		/* ignore */
+	}
+	return dir;
+}
+
+/** 判断某个路径是否属于 Chat 独立目录体系（chat-space 或 chat-projects/*）。 */
+export function isChatWorkspacePath(dataDir: string, targetPath: string): boolean {
+	if (!targetPath) return false;
+	const normTarget = normalizePathKey(resolve(targetPath)).replace(/\\/g, "/").replace(/\/+$/, "");
+	const normSpace = normalizePathKey(resolveChatSpaceDir(dataDir)).replace(/\\/g, "/").replace(/\/+$/, "");
+	if (normTarget === normSpace || normTarget.startsWith(`${normSpace}/`)) return true;
+	const normRoot = normalizePathKey(resolveChatProjectsRoot(dataDir)).replace(/\\/g, "/").replace(/\/+$/, "");
+	if (normTarget === normRoot || normTarget.startsWith(`${normRoot}/`)) return true;
+	return normTarget.includes("/chat-projects/") || normTarget.endsWith("/chat-space");
 }
 
 export function sanitizeProjectSlug(name: string): string {
@@ -226,10 +271,17 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 		} else if (!a && b) {
 			projects[key] = { ...b, items: mergeMemoryItems([], b.items ?? []) };
 		} else if (a && b) {
-			const aInstAt = a.instructionsUpdatedAt ?? a.updatedAt ?? 0;
-			const bInstAt = b.instructionsUpdatedAt ?? b.updatedAt ?? 0;
+			const aDel = a.deletedAt ?? 0;
+			const bDel = b.deletedAt ?? 0;
+			const maxDel = Math.max(aDel, bDel);
+			const aUpd = a.updatedAt ?? 0;
+			const bUpd = b.updatedAt ?? 0;
+			const maxUpd = Math.max(aUpd, bUpd);
+			const aInstAt = a.instructionsUpdatedAt ?? aUpd;
+			const bInstAt = b.instructionsUpdatedAt ?? bUpd;
 			const newerInst = bInstAt >= aInstAt ? b : a;
-			const newerMeta = (b.updatedAt ?? 0) >= (a.updatedAt ?? 0) ? b : a;
+			const newerMeta = bUpd >= aUpd ? b : a;
+			const isDeleted = maxDel > 0 && maxDel >= maxUpd;
 			projects[key] = {
 				projectKey: key,
 				name: newerMeta.name || a.name || b.name || key,
@@ -239,8 +291,9 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 				instructionsUpdatedAt: Math.max(aInstAt, bInstAt),
 				...(a.isChatProject || b.isChatProject ? { isChatProject: true } : {}),
 				...(newerMeta.slug || a.slug || b.slug ? { slug: newerMeta.slug || a.slug || b.slug } : {}),
-				updatedAt: Math.max(a.updatedAt ?? 0, b.updatedAt ?? 0),
-				items: mergeMemoryItems(a.items ?? [], b.items ?? []),
+				...(isDeleted ? { deletedAt: maxDel } : {}),
+				updatedAt: Math.max(maxUpd, maxDel),
+				items: isDeleted ? [] : mergeMemoryItems(a.items ?? [], b.items ?? []),
 			};
 		}
 	}
@@ -255,6 +308,7 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 		const rt = remote.chatTranscripts?.[sid];
 		const chosen = lt && rt ? ((rt.updatedAt ?? 0) >= (lt.updatedAt ?? 0) ? rt : lt) : (lt ?? rt);
 		if (chosen && chosen.sessionId && chosen.jsonl && chosen.jsonl.length <= MAX_TRANSCRIPT_BYTES) {
+			if (projects[chosen.scopeKey]?.deletedAt) continue;
 			transcriptList.push(chosen);
 		}
 	}
@@ -279,6 +333,7 @@ export class MemoryStore {
 	readonly dataDir: string;
 	readonly filePath: string;
 	private doc: MemoryDocument;
+	private lastDiskMtime = 0;
 	private changeListeners = new Set<() => void>();
 
 	constructor(dataDir: string) {
@@ -306,6 +361,11 @@ export class MemoryStore {
 	private loadFromDisk(): MemoryDocument {
 		try {
 			if (!existsSync(this.filePath)) return emptyDocument();
+			try {
+				this.lastDiskMtime = statSync(this.filePath).mtimeMs;
+			} catch {
+				/* ignore */
+			}
 			const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<MemoryDocument>;
 			if (!raw || typeof raw !== "object") return emptyDocument();
 			return mergeMemoryDocuments(emptyDocument(), {
@@ -323,22 +383,50 @@ export class MemoryStore {
 		}
 	}
 
-	private saveToDisk(): void {
+	/** 若磁盘上的 memory-store.json 已被其他窗口或进程更新，先无损合并进内存，防止旧内存覆盖新数据。 */
+	syncFromDiskIfNewer(): void {
 		try {
-			mkdirSync(this.dataDir, { recursive: true });
-			writeFileSync(this.filePath, JSON.stringify(this.doc, null, "\t"), "utf8");
+			if (!existsSync(this.filePath)) return;
+			const st = statSync(this.filePath);
+			if (st.mtimeMs > this.lastDiskMtime) {
+				const diskDoc = this.loadFromDisk();
+				this.doc = mergeMemoryDocuments(this.doc, diskDoc);
+			}
 		} catch {
 			/* ignore */
 		}
 	}
 
-	/** 确保所有同步过来的话题项目在本地 <dataDir>/chat-projects/<slug> 下有实体目录。 */
+	private saveToDisk(): void {
+		try {
+			mkdirSync(this.dataDir, { recursive: true });
+			writeFileSync(this.filePath, JSON.stringify(this.doc, null, "\t"), "utf8");
+			try {
+				this.lastDiskMtime = statSync(this.filePath).mtimeMs;
+			} catch {
+				/* ignore */
+			}
+		} catch {
+			/* ignore */
+		}
+	}
+
+	/** 确保所有同步过来的话题项目在本地 <dataDir>/chat-projects/<slug> 下有实体目录（已标记删除的则清理）。 */
 	ensureChatProjectDirs(): void {
 		const root = resolveChatProjectsRoot(this.dataDir);
 		for (const bucket of Object.values(this.doc.projects)) {
 			if (bucket.isChatProject && bucket.slug) {
+				const dir = join(root, sanitizeProjectSlug(bucket.slug));
+				if (bucket.deletedAt) {
+					try {
+						if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+					} catch {
+						/* ignore */
+					}
+					continue;
+				}
 				try {
-					mkdirSync(join(root, sanitizeProjectSlug(bucket.slug)), { recursive: true });
+					mkdirSync(dir, { recursive: true });
 				} catch {
 					/* ignore */
 				}
@@ -347,11 +435,13 @@ export class MemoryStore {
 	}
 
 	getDocument(): MemoryDocument {
+		this.syncFromDiskIfNewer();
 		return JSON.parse(JSON.stringify(this.doc)) as MemoryDocument;
 	}
 
 	/** 与远端文档合并并落盘（返回合并后的文档，同时将远端 Chat 对话记录还原到本地会话目录）。 */
 	mergeRemote(remote: MemoryDocument): MemoryDocument {
+		this.syncFromDiskIfNewer();
 		this.captureChatTranscriptsFromDisk(false);
 		this.doc = mergeMemoryDocuments(this.doc, remote);
 		this.ensureChatProjectDirs();
@@ -365,6 +455,7 @@ export class MemoryStore {
 	 * 打包进 doc.chatTranscripts 以便随 GitHub 云同步上传。
 	 */
 	captureChatTranscriptsFromDisk(notify = true): boolean {
+		this.syncFromDiskIfNewer();
 		const targets: { scopeKey: string; dir: string; placeholder: string }[] = [
 			{
 				scopeKey: "chat-space",
@@ -512,6 +603,7 @@ export class MemoryStore {
 
 	/** 新增或幂等更新一条记忆（若已有完全相同内容的条目则直接刷新时间戳）。 */
 	addItem(scope: MemoryScope, content: string, cwd?: string): MemoryItem {
+		this.syncFromDiskIfNewer();
 		const text = clampText(content, MAX_MEMORY_ITEM_CHARS);
 		if (!text) throw new Error("Memory content cannot be empty");
 		const now = Date.now();
@@ -541,6 +633,7 @@ export class MemoryStore {
 		targetList.unshift(item);
 		if (scope === "project" && cwd) {
 			const b = this.ensureProjectBucket(cwd);
+			delete b.deletedAt;
 			b.updatedAt = now;
 			b.items = mergeMemoryItems(targetList, []);
 		} else {
@@ -558,6 +651,7 @@ export class MemoryStore {
 		patch: { content?: string; enabled?: boolean },
 		cwd?: string,
 	): MemoryItem | null {
+		this.syncFromDiskIfNewer();
 		const list =
 			scope === "global" || !cwd
 				? this.doc.global
@@ -581,6 +675,7 @@ export class MemoryStore {
 	}
 
 	deleteItem(scope: MemoryScope, id: string, cwd?: string): boolean {
+		this.syncFromDiskIfNewer();
 		const list =
 			scope === "global" || !cwd
 				? this.doc.global
@@ -597,10 +692,12 @@ export class MemoryStore {
 	}
 
 	setProjectInstructions(cwd: string, instructions: string): void {
+		this.syncFromDiskIfNewer();
 		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
 		if (id.isChatSpace) return;
 		const bucket = this.ensureProjectBucket(cwd);
 		const now = Date.now();
+		delete bucket.deletedAt;
 		bucket.instructions = clampText(instructions, MAX_PROJECT_INSTRUCTIONS_CHARS);
 		bucket.instructionsUpdatedAt = now;
 		bucket.updatedAt = now;
@@ -611,6 +708,7 @@ export class MemoryStore {
 
 	/** 创建或更新一个云端可同步的「话题项目」（位于 <dataDir>/chat-projects/<slug>）。 */
 	createChatProject(name: string, instructions = ""): { slug: string; name: string; path: string } {
+		this.syncFromDiskIfNewer();
 		const trimmedName = clampText(name, 80) || "New Project";
 		const slug = sanitizeProjectSlug(trimmedName);
 		const dir = join(resolveChatProjectsRoot(this.dataDir), slug);
@@ -626,12 +724,89 @@ export class MemoryStore {
 			isChatProject: true,
 			slug,
 			updatedAt: now,
-			items: existing?.items ?? [],
+			items: existing?.deletedAt ? [] : (existing?.items ?? []),
 		};
 		this.doc.updatedAt = now;
 		this.saveToDisk();
 		this.notifyChange();
 		return { slug, name: trimmedName, path: dir };
+	}
+
+	/**
+	 * 删除指定路径对应的项目（若为 Chat 话题项目，同步写入墓碑、移除云端对话记录并清理本地 chat-projects/<slug> 目录）。
+	 */
+	deleteProjectByCwd(cwd: string): boolean {
+		this.syncFromDiskIfNewer();
+		if (!cwd) return false;
+		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
+		if (id.isChatSpace) return false;
+		const now = Date.now();
+		let touched = false;
+		const targetKeyLower = id.projectKey.toLowerCase();
+		const targetSlugLower = id.chatProjectSlug?.toLowerCase();
+
+		for (const [k, b] of Object.entries(this.doc.projects)) {
+			if (k.toLowerCase() === targetKeyLower || (targetSlugLower && b.slug?.toLowerCase() === targetSlugLower)) {
+				this.doc.projects[k] = {
+					projectKey: k,
+					name: b.name || id.name,
+					...(b.isChatProject || id.chatProjectSlug ? { isChatProject: true, slug: b.slug || id.chatProjectSlug } : {}),
+					deletedAt: now,
+					updatedAt: now,
+					items: [],
+				};
+				touched = true;
+			}
+		}
+		if (!touched && (this.doc.projects[id.projectKey] || id.chatProjectSlug)) {
+			this.doc.projects[id.projectKey] = {
+				projectKey: id.projectKey,
+				name: id.name,
+				...(id.chatProjectSlug ? { isChatProject: true, slug: id.chatProjectSlug } : {}),
+				deletedAt: now,
+				updatedAt: now,
+				items: [],
+			};
+			touched = true;
+		}
+		if (this.doc.chatTranscripts) {
+			for (const [sid, tr] of Object.entries(this.doc.chatTranscripts)) {
+				if (tr.scopeKey.toLowerCase() === targetKeyLower) {
+					delete this.doc.chatTranscripts[sid];
+					touched = true;
+				}
+			}
+		}
+		if (id.chatProjectSlug) {
+			const root = resolveChatProjectsRoot(this.dataDir);
+			const dir = join(root, sanitizeProjectSlug(id.chatProjectSlug));
+			try {
+				const sessionDir = SessionManager.create(dir).getSessionDir();
+				if (existsSync(sessionDir)) rmSync(sessionDir, { recursive: true, force: true });
+			} catch {
+				/* ignore */
+			}
+			try {
+				if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+				// 同时清理同目录下大小写不同的同名子目录
+				if (existsSync(root)) {
+					for (const entry of readdirSync(root, { withFileTypes: true })) {
+						if (entry.isDirectory() && sanitizeProjectSlug(entry.name).toLowerCase() === targetSlugLower) {
+							rmSync(join(root, entry.name), { recursive: true, force: true });
+						}
+					}
+				}
+			} catch {
+				/* ignore */
+			}
+			touched = true;
+		}
+		if (touched) {
+			this.doc.updatedAt = now;
+			this.saveToDisk();
+			this.notifyChange();
+		}
+		return touched;
 	}
 
 	listChatProjects(): {
@@ -652,10 +827,15 @@ export class MemoryStore {
 			updatedAt: number;
 		}[] = [];
 		const seen = new Set<string>();
+		const deletedSlugs = new Set<string>();
 		for (const b of Object.values(this.doc.projects)) {
 			if (!b.isChatProject || !b.slug) continue;
 			const slug = sanitizeProjectSlug(b.slug);
-			seen.add(slug);
+			if (b.deletedAt) {
+				deletedSlugs.add(slug.toLowerCase());
+				continue;
+			}
+			seen.add(slug.toLowerCase());
 			const p = join(root, slug);
 			try {
 				mkdirSync(p, { recursive: true });
@@ -673,7 +853,9 @@ export class MemoryStore {
 		}
 		try {
 			for (const entry of readdirSync(root, { withFileTypes: true })) {
-				if (!entry.isDirectory() || seen.has(entry.name)) continue;
+				if (!entry.isDirectory()) continue;
+				const slugKey = sanitizeProjectSlug(entry.name).toLowerCase();
+				if (seen.has(slugKey) || deletedSlugs.has(slugKey)) continue;
 				out.push({
 					slug: entry.name,
 					name: entry.name,
@@ -689,6 +871,127 @@ export class MemoryStore {
 		return out.sort((a, b) => b.updatedAt - a.updatedAt);
 	}
 
+	/** 解析并返回当前已捕获/同步的 Chat 对话列表摘要（供前端「记忆与跨端同步」面板直观展示与一键跳转）。 */
+	listSyncedTranscripts(): SyncedTranscriptSummary[] {
+		const map = this.doc.chatTranscripts ?? {};
+		const out: SyncedTranscriptSummary[] = [];
+		const chatSpaceDir = resolveChatSpaceDir(this.dataDir);
+		const chatProjectsRoot = resolveChatProjectsRoot(this.dataDir);
+
+		for (const tr of Object.values(map)) {
+			if (!tr?.sessionId || !tr?.jsonl) continue;
+			if (this.doc.projects[tr.scopeKey]?.deletedAt) continue;
+			let cwd = chatSpaceDir;
+			let scopeName = "💬 独立对话";
+			if (tr.scopeKey.startsWith("chat-project:")) {
+				const slug = sanitizeProjectSlug(tr.scopeKey.slice("chat-project:".length));
+				cwd = join(chatProjectsRoot, slug);
+				scopeName = this.doc.projects[tr.scopeKey]?.name || slug;
+			}
+			let title = "";
+			let firstUserText = "";
+			let messageCount = 0;
+			for (const rawLine of tr.jsonl.split("\n")) {
+				const line = rawLine.trim();
+				if (!line.startsWith("{")) continue;
+				try {
+					const obj = JSON.parse(line) as Record<string, unknown>;
+					if (obj.type === "session_info" && typeof obj.name === "string" && obj.name.trim()) {
+						title = obj.name.trim();
+					} else if (obj.type === "message" && obj.message && typeof obj.message === "object") {
+						const msg = obj.message as Record<string, unknown>;
+						if (msg.role === "user" || msg.role === "assistant") {
+							messageCount++;
+						}
+						if (msg.role === "user" && !firstUserText) {
+							if (typeof msg.content === "string") {
+								firstUserText = msg.content.trim();
+							} else if (Array.isArray(msg.content)) {
+								for (const part of msg.content) {
+									if (part && typeof part === "object" && (part as Record<string, unknown>).type === "text") {
+										const t = String((part as Record<string, unknown>).text ?? "").trim();
+										if (t) {
+											firstUserText = t;
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
+				} catch {
+					/* ignore */
+				}
+			}
+			const finalTitle = (title || firstUserText || tr.sessionId.slice(0, 8)).replace(/\s+/g, " ").slice(0, 80);
+			let filePath = tr.fileName;
+			try {
+				filePath = join(SessionManager.create(cwd).getSessionDir(), basename(tr.fileName));
+			} catch {
+				/* ignore */
+			}
+			out.push({
+				sessionId: tr.sessionId,
+				fileName: tr.fileName,
+				title: finalTitle,
+				scopeKey: tr.scopeKey,
+				scopeName,
+				cwd,
+				filePath,
+				messageCount,
+				updatedAt: tr.updatedAt || 0,
+			});
+		}
+		return out.sort((a, b) => b.updatedAt - a.updatedAt);
+	}
+
+	/**
+	 * 从用户发言中自动提取长期背景事实/硬件环境/个人目标/偏好并存入记忆库
+	 * （当会话未开启「独立记忆」时生效，解决模型未主动输出 [[memory:...]] 导致记忆为 0 的问题）。
+	 */
+	ingestUserMessage(userText: string, cwd: string, sessionKey?: string): MemoryItem[] {
+		if (!userText || this.isSessionIsolated(sessionKey)) return [];
+		const clean = userText.trim();
+		if (clean.length < 4 || clean.length > 2000) return [];
+		const added: MemoryItem[] = [];
+
+		// 1. 显式要求记住的内容：「记住…」「请记住…」「我的偏好是…」
+		const explicitRe = /(?:请?帮我记住|请?记住|记一下|我的偏好是|以后默认|remember that)\s*[:：，,]?\s*([^\n。；;]{4,180})/gi;
+		let m: RegExpExecArray | null;
+		while ((m = explicitRe.exec(clean)) !== null) {
+			const fact = m[1]?.trim();
+			if (fact) added.push(this.addItem("global", fact, cwd));
+		}
+
+		// 2. 硬件与系统环境自述（例如包含显卡/内存/操作系统组合）
+		const hasOs = /\b(ubuntu|windows|macos|arch\s*linux|debian|wsl2?)\b/i.test(clean);
+		const hasHw = /\b(rtx\s*\d{3,4}|gtx\s*\d{3,4}|[1-9]\d*\s*g(?:b)?\s*(?:ddr\d|ram|内存|显存)|ddr[45]|m[1-4]\s*(?:pro|max|ultra)?|a100|h100|4090|3090|3080)\b/i.test(clean);
+		if (hasOs && hasHw) {
+			const clauses = clean
+				.split(/[。\n；;，,]|(?=(?:[1-9][、.\s]*)?(?:当前基础|目前基础|最终目的|目的是|目标是))/)
+				.map((s) => s.trim())
+				.filter(Boolean);
+			for (const c of clauses) {
+				if (/\b(ubuntu|windows|macos|rtx|ddr|ram|3080|3090|4090|显存|内存)\b/i.test(c) && c.length <= 160) {
+					added.push(this.addItem("global", `硬件与系统环境：${c}`, cwd));
+					break;
+				}
+			}
+		}
+
+		// 3. 个人技术基础与学习/求职目标自述
+		const bgMatch = /(?:当前基础|目前基础|个人基础|我的基础)\s*(?:是|为|[:：])?\s*([^\n。；;]{4,140}?)(?=\s*(?:[1-9][、.\s]*)?(?:最终目的|学习目的|目的是|目标是|$))/i.exec(clean);
+		if (bgMatch?.[1]) {
+			added.push(this.addItem("global", `技术基础：${bgMatch[1].trim()}`, cwd));
+		}
+		const goalMatch = /(?:最终目的|学习目的|目的是|目标是)\s*(?:是|为|[:：])?\s*([^\n。，,；;]{3,100})/i.exec(clean);
+		if (goalMatch?.[1]) {
+			added.push(this.addItem("global", `当前目标：${goalMatch[1].trim()}`, cwd));
+		}
+
+		return added;
+	}
+
 	/** 判断指定会话是否开启了「🔒 独立记忆（不读写共享记忆）」。 */
 	isSessionIsolated(sessionKey: string | undefined): boolean {
 		if (!sessionKey) return false;
@@ -696,6 +999,7 @@ export class MemoryStore {
 	}
 
 	setSessionIsolated(sessionKey: string, isolated: boolean): boolean {
+		this.syncFromDiskIfNewer();
 		if (!sessionKey) return false;
 		const set = new Set(this.doc.isolatedSessionIds ?? []);
 		if (isolated) set.add(sessionKey);
@@ -709,18 +1013,25 @@ export class MemoryStore {
 
 	/** 供前端面板展示的当前工作区记忆快照。 */
 	getView(cwd: string): MemorySnapshotView {
+		this.syncFromDiskIfNewer();
+		this.captureChatTranscriptsFromDisk(false);
 		const chatSpaceCwd = resolveChatSpaceDir(this.dataDir);
+		const chatProjectsRoot = resolveChatProjectsRoot(this.dataDir);
+		const workProjectsRoot = resolveWorkProjectsRoot(this.dataDir);
 		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
 		const bucket = this.doc.projects[id.projectKey];
 		return {
 			chatSpaceCwd,
+			chatProjectsRoot,
+			workProjectsRoot,
 			isChatSpace: id.isChatSpace,
 			projectKey: id.projectKey,
 			projectName: bucket?.name || id.name,
-			projectInstructions: bucket?.instructions ?? "",
+			projectInstructions: bucket?.deletedAt ? "" : (bucket?.instructions ?? ""),
 			globalItems: this.listActiveItems("global"),
 			projectItems: this.listActiveItems("project", cwd),
 			chatProjects: this.listChatProjects(),
+			syncedTranscripts: this.listSyncedTranscripts(),
 		};
 	}
 

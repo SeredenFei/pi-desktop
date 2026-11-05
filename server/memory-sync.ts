@@ -7,7 +7,7 @@
  * - 合并：拉取远端 `memory-store.json` 与本地 MemoryStore 执行逐条时间戳 + 墓碑合并（mergeMemoryDocuments），
  *         再将合并后的最新文档写回远端，确保多端（Mac / Windows / Ubuntu）任意顺序登录修改都不丢数据。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { MemoryDocument, MemoryStore } from "./memory-store.js";
 
@@ -47,6 +47,7 @@ export class MemorySyncService {
 	private readonly configPath: string;
 	private readonly store: MemoryStore;
 	private account: MemorySyncAccount | null = null;
+	private lastConfigMtime = 0;
 	private syncing = false;
 	private lastError: string | null = null;
 	private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,6 +93,11 @@ export class MemorySyncService {
 	private loadAccount(): MemorySyncAccount | null {
 		try {
 			if (!existsSync(this.configPath)) return null;
+			try {
+				this.lastConfigMtime = statSync(this.configPath).mtimeMs;
+			} catch {
+				/* ignore */
+			}
 			const raw = JSON.parse(readFileSync(this.configPath, "utf8")) as StoredSyncConfig;
 			if (raw?.account?.token && raw?.account?.username) {
 				return {
@@ -108,16 +114,35 @@ export class MemorySyncService {
 		return null;
 	}
 
+	private refreshAccountFromDiskIfChanged(): void {
+		try {
+			if (!existsSync(this.configPath)) return;
+			const st = statSync(this.configPath);
+			if (!this.account || st.mtimeMs > this.lastConfigMtime) {
+				const loaded = this.loadAccount();
+				if (loaded) this.account = loaded;
+			}
+		} catch {
+			/* ignore */
+		}
+	}
+
 	private saveAccount(): void {
 		try {
 			mkdirSync(resolve(this.configPath, ".."), { recursive: true });
 			writeFileSync(this.configPath, JSON.stringify({ account: this.account }, null, "\t"), "utf8");
+			try {
+				this.lastConfigMtime = statSync(this.configPath).mtimeMs;
+			} catch {
+				/* ignore */
+			}
 		} catch {
 			/* ignore */
 		}
 	}
 
 	getStatus(): MemorySyncStatus {
+		this.refreshAccountFromDiskIfChanged();
 		return {
 			loggedIn: Boolean(this.account),
 			username: this.account?.username,
@@ -288,12 +313,13 @@ export class MemorySyncService {
 	}
 
 	private scheduleAutoSync(): void {
+		this.refreshAccountFromDiskIfChanged();
 		if (!this.account) return;
 		if (this.debounceTimer) clearTimeout(this.debounceTimer);
 		this.debounceTimer = setTimeout(() => {
 			this.debounceTimer = null;
 			void this.syncNow().catch(() => {});
-		}, 3000);
+		}, 1200);
 	}
 
 	private async ensureRemoteRepo(acc: MemorySyncAccount): Promise<void> {
@@ -319,6 +345,7 @@ export class MemorySyncService {
 
 	/** 立即执行一次双向无损合并同步（Pull 远端 → 逐条时间戳合并 → Push 回远端）。 */
 	async syncNow(): Promise<MemorySyncStatus> {
+		this.refreshAccountFromDiskIfChanged();
 		if (!this.account) return this.getStatus();
 		if (this.syncing) return this.getStatus();
 		this.syncing = true;

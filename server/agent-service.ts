@@ -110,7 +110,7 @@ import {
 } from "./goal-service.js";
 import { buildEvidenceDigest, sessionMessagesOf } from "./goal-evidence.js";
 import { MarkerService } from "./marker-service.js";
-import { getMemoryStore } from "./memory-store.js";
+import { getMemoryStore, isChatWorkspacePath, resolveChatSpaceDir } from "./memory-store.js";
 import { discoverDiskSkills, mergeSkillCollections, readSkillInstruction } from "./skill-discovery.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
 import { ModelAdminService } from "./model-admin.js";
@@ -6399,6 +6399,15 @@ export class ClientSession {
 					// 因此在微任务里即可精确拿到本条用户消息的 entryId 并异步绑定工作区影子快照，
 					// 既不阻塞流式入队与 UI 快照推送，又保证插队/排队轮次也有独立的写工具前快照。
 					this.bindOrStartWorkspaceSnapshotForUserMessage(conv);
+					try {
+						const userText = extractAssistantTextFromContent(mm.content);
+						if (userText) {
+							const sid = conv.session?.sessionId || conv.id;
+							getMemoryStore(this.stateStore?.dataDir)?.ingestUserMessage(userText, conv.cwd || this.cwd, sid);
+						}
+					} catch {
+						/* ignore */
+					}
 					break;
 				}
 				if (mm?.role !== "assistant") break;
@@ -14135,16 +14144,77 @@ export class ClientSession {
 		}
 	}
 
-	/** Remove an entry from the client's recent-project list (UI state only, or destroy if sandbox). */
+	/** Remove an entry from the client's recent-project list (UI state, Chat project store/folder, or destroy if sandbox). */
 	async removeProject(path: string): Promise<void> {
-		const sbx = this.sandboxes.get(path) ?? this.sandboxes.getByCwd(path);
+		const target = path?.trim();
+		if (!target) return;
+		const sbx = this.sandboxes.get(target) ?? this.sandboxes.getByCwd(target);
 		if (sbx) {
 			await this.destroySandbox(sbx.path);
 			return;
 		}
-		this.stateStore.removeProject(this.clientId, path);
+		const dataDir = this.stateStore?.dataDir;
+		const mem = getMemoryStore(dataDir);
+		const wasChat = dataDir ? isChatWorkspacePath(dataDir, target) : false;
+
+		// 1. 若当前正在该目录下（或内存中有归属于该目录的会话），先清理内存会话并切换 cwd，
+		//    防止 LeftPanel 的活跃会话兜底循环将已删除项目再次塞回侧栏。
+		const targetNorm = normalizePathKey(target);
+		const matchingConvs = [...this.convs.values()].filter(
+			(c) => normalizePathKey(c.cwd) === targetNorm || isSameOrSubpath(c.cwd, target),
+		);
+		const deletingCurrentCwd = normalizePathKey(this.cwd) === targetNorm || isSameOrSubpath(this.cwd, target);
+
+		// 2. 先写入状态库墓碑并同步清理 MemoryStore 中的 Chat 项目及目录
+		this.stateStore.removeProject(this.clientId, target);
+		mem?.deleteProjectByCwd(target);
+		this.invalidateProjectsCache();
+
+		for (const conv of matchingConvs) {
+			try {
+				conv.activePromptAc?.abort();
+				this.settlePendingsForConv(conv.id);
+				conv.terminals.killAll();
+				this.clearConversationToolStates(conv);
+				this.goalSvc.notifyConversationRemoved(conv as unknown as import("./goal-service.js").GoalConversation);
+				await conv.session.abort();
+				await conv.runtime.dispose();
+				conv.unsubscribe?.();
+				conv.unsubscribe = undefined;
+				disposeEvalSession(conv.id);
+				conv.promptInFlight = false;
+				if (this.activeId === conv.id) this.activeId = "";
+				this.removeConversation(conv.id, true);
+			} catch {
+				/* ignore */
+			}
+		}
+
+		if (deletingCurrentCwd) {
+			let fallbackCwd = homedir();
+			if (wasChat && dataDir) {
+				fallbackCwd = resolveChatSpaceDir(dataDir);
+			} else {
+				const remaining = await this.stateStore.getRecentProjects(this.clientId);
+				const nextProj = remaining.find((p) => {
+					const k = normalizePathKey(p.path);
+					if (k === targetNorm) return false;
+					if (dataDir && isChatWorkspacePath(dataDir, p.path)) return false;
+					return true;
+				});
+				if (nextProj?.path) fallbackCwd = nextProj.path;
+			}
+			if (normalizePathKey(fallbackCwd) !== targetNorm) {
+				await this.setCwd(fallbackCwd);
+			} else if (this.convs.size === 0) {
+				await this.newChat();
+			}
+		}
+
 		this.invalidateProjectsCache();
 		await this.pushProjects();
+		this.emitConversations();
+		this.flushSnapshot(true);
 	}
 
 	/** Permanently delete a persisted session transcript file (history list ✕).

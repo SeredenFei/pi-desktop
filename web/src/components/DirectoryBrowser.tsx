@@ -177,7 +177,10 @@ export function DirectoryBrowser({
 				setRemoteDraft(parsed.remotePath);
 			}
 		} else {
-			const norm = (currentCwd || "").replace(/\\/g, "/");
+			let norm = (currentCwd || "").replace(/\\/g, "/");
+			if (norm.includes("/chat-projects/") || norm.endsWith("/chat-space")) {
+				norm = (homeDir || "").replace(/\\/g, "/") || norm;
+			}
 			setBrowsePath(norm);
 			setDraft(norm);
 		}

@@ -156,5 +156,30 @@ describe("MemoryStore & cross-device merge", () => {
 		expect(existsSync(restoredFile)).toBe(true);
 		const restoredHeader = JSON.parse(readFileSync(restoredFile, "utf8").split("\n")[0]!);
 		expect(restoredHeader.cwd).toBe(chatProjBPath);
+
+		// Verify listSyncedTranscripts exposes the transcript summary in getView()
+		const viewB = storeB.getView(chatProjBPath);
+		expect(viewB.syncedTranscripts).toHaveLength(1);
+		expect(viewB.syncedTranscripts[0]?.title).toContain("Summarize this paper");
+
+		// Verify deleting the Chat Project removes its directory, adds a tombstone, and prevents remote resurrection
+		expect(storeB.deleteProjectByCwd(chatProjBPath)).toBe(true);
+		expect(existsSync(chatProjBPath)).toBe(false);
+		expect(storeB.listChatProjects()).toHaveLength(0);
+		storeB.mergeRemote(exportedDoc);
+		expect(storeB.listChatProjects()).toHaveLength(0);
+	});
+
+	it("auto-extracts user hardware, background, and goals from chat messages", () => {
+		const dir = makeTempDir();
+		const store = new MemoryStore(dir);
+		const extracted = store.ingestUserMessage(
+			"有ram32G DDR5 3080 20G ubuntu ,机器人的话都想有涉猎 当前基础 是控制基础都有了解会用但是理解不够 RL学过PPO做过一些简单locomotion在gymnasium&mujoco上 4目的是未来找工作找实习",
+			store.getView(dir).chatSpaceCwd,
+		);
+		expect(extracted.length).toBeGreaterThanOrEqual(2);
+		const allTexts = store.listActiveItems("global").map((i) => i.content).join(" | ");
+		expect(allTexts).toContain("3080");
+		expect(allTexts).toContain("找工作找实习");
 	});
 });

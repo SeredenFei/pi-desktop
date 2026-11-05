@@ -787,3 +787,21 @@
 html[data-shell="minimal"] .lp-project-tree-children .lp-row.lp-sub::before {
 	border-color: var(--border);
 }
+
+/*
+ * 项目行操作按钮（新建对话 + / 删除项目 🗑）：常驻布局占位（不再 display:none 闪烁跳动），
+ * 平时半透明弱化、悬停或进入「确认删除」状态时完全显现，避免第二次点击时按钮消失误触底下的切换项目。
+ */
+html[data-shell="minimal"] .lp-project-head-row .lp-project-actions {
+	display: inline-flex;
+	opacity: 0.55;
+	transition: opacity 0.15s ease;
+}
+html[data-shell="minimal"] .lp-project-head-row:hover .lp-project-actions,
+html[data-shell="minimal"] .lp-project-head-row .lp-project-actions:has(.confirm) {
+	opacity: 1;
+}
+html[data-shell="minimal"] .lp-project-head-row:has(.confirm) .project-time {
+	display: none;
+}
+

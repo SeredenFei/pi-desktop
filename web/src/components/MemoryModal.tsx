@@ -35,8 +35,22 @@ export interface ChatProjectEntry {
 	updatedAt: number;
 }
 
+export interface SyncedTranscriptSummary {
+	sessionId: string;
+	fileName: string;
+	title: string;
+	scopeKey: string;
+	scopeName: string;
+	cwd: string;
+	filePath: string;
+	messageCount: number;
+	updatedAt: number;
+}
+
 export interface MemorySnapshotView {
 	chatSpaceCwd: string;
+	chatProjectsRoot?: string;
+	workProjectsRoot?: string;
 	isChatSpace: boolean;
 	projectKey: string;
 	projectName: string;
@@ -44,6 +58,7 @@ export interface MemorySnapshotView {
 	globalItems: MemoryItem[];
 	projectItems: MemoryItem[];
 	chatProjects: ChatProjectEntry[];
+	syncedTranscripts?: SyncedTranscriptSummary[];
 }
 
 export interface MemorySyncStatus {
@@ -132,6 +147,12 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 		void refresh();
 	}, [refresh, open]);
 
+	useEffect(() => {
+		const onRefresh = () => void refresh();
+		window.addEventListener("pi-web-ui:memory-refresh", onRefresh);
+		return () => window.removeEventListener("pi-web-ui:memory-refresh", onRefresh);
+	}, [refresh]);
+
 	// 设备码登录等待期间每 2.5s 自动轮询一次状态
 	useEffect(() => {
 		if (!open && !state.sync?.deviceFlow) return;
@@ -163,12 +184,30 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 		[sessionId],
 	);
 
+	const deleteChatProject = useCallback(
+		async (path: string) => {
+			try {
+				const res = await apiPostMemory("/api/memory/chat-project", {
+					op: "delete",
+					path,
+					cwd,
+					sessionId,
+				});
+				setState(res);
+			} catch {
+				/* ignore */
+			}
+		},
+		[cwd, sessionId],
+	);
+
 	return {
 		memory: state,
 		setMemory: setState,
 		refreshMemory: refresh,
 		toggleIsolated,
 		createChatProject,
+		deleteChatProject,
 	};
 }
 
@@ -204,6 +243,15 @@ export function ChatSpaceHeader({
 	const zh = isZhLocale(locale);
 	const [creatingProj, setCreatingProj] = useState(false);
 	const [projName, setProjName] = useState("");
+
+	useEffect(() => {
+		const onOpenNew = () => {
+			onModeChange("chat");
+			setCreatingProj(true);
+		};
+		window.addEventListener("pi-web-ui:open-new-chat-project", onOpenNew);
+		return () => window.removeEventListener("pi-web-ui:open-new-chat-project", onOpenNew);
+	}, [onModeChange]);
 
 	const submitNewProj = () => {
 		const trimmed = projName.trim();
@@ -326,6 +374,7 @@ export function MemoryModal({
 	setMemory,
 	onClose,
 	onSwitchCwd,
+	onOpenTranscript,
 }: {
 	open: boolean;
 	cwd: string;
@@ -334,6 +383,7 @@ export function MemoryModal({
 	setMemory: (next: MemoryApiState) => void;
 	onClose: () => void;
 	onSwitchCwd: (targetCwd: string) => void;
+	onOpenTranscript?: (cwd: string, filePath: string, sessionId: string) => void;
 }) {
 	const { locale } = useI18n();
 	const zh = isZhLocale(locale);
@@ -379,6 +429,8 @@ export function MemoryModal({
 
 	const globalItems = view?.globalItems ?? [];
 	const projectItems = view?.projectItems ?? [];
+	const syncedTranscripts = view?.syncedTranscripts ?? [];
+	const chatProjects = view?.chatProjects ?? [];
 	const isChatSpace = view?.isChatSpace ?? false;
 
 	return (
@@ -952,6 +1004,64 @@ export function MemoryModal({
 								{sync?.lastError && <div className="mem-err">{sync.lastError}</div>}
 							</div>
 						)}
+
+						{/* 已捕获 / 云端同步内容可视化清单 */}
+						<div className="mem-sync-card" style={{ marginTop: 12 }} data-testid="mem-sync-overview">
+							<div className="mem-sec-label" style={{ marginBottom: 8 }}>
+								{zh
+									? `📦 跨端同步数据总览（全局记忆 ${globalItems.length} 条 · Chat 项目 ${chatProjects.length} 个 · Chat 对话记录 ${syncedTranscripts.length} 段）`
+									: `📦 Synced Data (${globalItems.length} global memories · ${chatProjects.length} Chat projects · ${syncedTranscripts.length} Chat transcripts)`}
+							</div>
+							<div className="mem-sync-hint" style={{ marginBottom: 10 }}>
+								{zh
+									? "同步机制说明：1) 你在对话中提到的硬件环境、个人基础、学习/求职目标或“记住…”会自动提取进记忆库；2) 在 Chat 模式（独立对话及 Chat 项目）下的每轮对话结束后，对话记录与记忆会自动打包并在后台同步到 GitHub 私有仓库。"
+									: "How sync works: 1) Personal facts/goals shared in chat are automatically extracted into memory; 2) Every turn in Chat mode (Standalone Chats & Chat Projects) automatically packages the transcript and syncs to your private GitHub repo."}
+							</div>
+							{syncedTranscripts.length === 0 ? (
+								<div className="mem-empty" style={{ padding: "12px 0" }}>
+									{zh
+										? "暂无已捕获的 Chat 对话记录（在 Chat 模式下发送消息后会自动收录并同步）。"
+										: "No Chat transcripts captured yet (send a message in Chat mode to auto-capture and sync)."}
+								</div>
+							) : (
+								<div className="mem-list" data-testid="mem-synced-transcripts">
+									{syncedTranscripts.map((tr) => (
+										<div key={tr.sessionId} className="mem-row" style={{ justifyContent: "space-between", gap: 10 }}>
+											<div style={{ minWidth: 0, flex: 1 }}>
+												<div
+													style={{
+														fontWeight: 600,
+														fontSize: 13,
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
+													}}
+												>
+													{tr.title}
+												</div>
+												<div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>
+													<span>{tr.scopeName}</span>
+													<span> · {zh ? `${tr.messageCount} 条消息` : `${tr.messageCount} msgs`}</span>
+													{tr.updatedAt > 0 && (
+														<span> · {new Date(tr.updatedAt).toLocaleString()}</span>
+													)}
+												</div>
+											</div>
+											{onOpenTranscript && (
+												<button
+													type="button"
+													className="btn secondary"
+													style={{ flexShrink: 0, padding: "4px 10px", fontSize: 12 }}
+													onClick={() => onOpenTranscript(tr.cwd, tr.filePath, tr.sessionId)}
+												>
+													{zh ? "打开对话" : "Open"}
+												</button>
+											)}
+										</div>
+									))}
+								</div>
+							)}
+						</div>
 					</div>
 				)}
 			</div>

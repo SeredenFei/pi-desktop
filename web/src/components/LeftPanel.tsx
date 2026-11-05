@@ -157,6 +157,8 @@ interface LeftPanelProps {
 	headerSlot?: ReactNode;
 	/** 单项目聚焦模式：平时只显示大项目行（无展开小箭头），双击项目才进入并展开对话列表；展开后点收起即退出观看该项目。 */
 	singleProjectFocus?: boolean;
+	/** 当前侧栏顶层模式（chat = 独立对话与话题项目；work = 本地代码工程）。 */
+	sidebarMode?: "chat" | "work";
 	/** 单项目聚焦模式下点击「收起」退出当前项目时的回调。 */
 	onExitProject?: (projectPath: string) => void;
 }
@@ -394,6 +396,7 @@ export const LeftPanel = memo(function LeftPanel({
 	footer,
 	headerSlot,
 	singleProjectFocus = false,
+	sidebarMode,
 	onExitProject,
 }: LeftPanelProps) {
 	const t = useT();
@@ -472,6 +475,9 @@ export const LeftPanel = memo(function LeftPanel({
 		setVisibleSessionCount(60);
 	}, [currentCwd]);
 
+	// 已乐观移除的项目（key -> 移除时间戳）：点击确认删除后 0ms 从列表消失；若后续重新打开/新建（lastUsed > removedAt）则自动放行
+	const [removedProjectAt, setRemovedProjectAt] = useState<Record<string, number>>({});
+
 	// 1. 物理级去重：按 normalizeSessionPathKey 确保每个项目唯一，杜绝重复项
 	const deduplicatedProjects = useMemo(() => {
 		const seen = new Set<string>();
@@ -479,28 +485,35 @@ export const LeftPanel = memo(function LeftPanel({
 		for (const p of projects) {
 			const normP = normalizeSessionPathKey(p.path);
 			if (seen.has(normP)) continue;
+			const removedTs = removedProjectAt[normP];
+			if (removedTs && (p.lastUsed ?? 0) <= removedTs) continue;
 			seen.add(normP);
 			list.push(p);
 		}
-		// 仅当项目未被登记但存在活跃会话时，作为活动项目安全补入列表末尾，保证运行中对话不丢失，且不扰乱既有项目排序
-		for (const c of conversations) {
-			if (!c.cwd) continue;
-			const normC = normalizeSessionPathKey(c.cwd);
-			if (!seen.has(normC)) {
-				seen.add(normC);
-				list.push({ path: c.cwd, lastUsed: Date.now() });
+		// 仅在常规模式（非 Chat/Work 分栏的 singleProjectFocus 模式）下才将未登记的活跃会话补入项目列表，
+		// 杜绝 Chat 与 Work 模式跨目录串台以及已删除项目因残留会话被强行复活。
+		if (!singleProjectFocus) {
+			for (const c of conversations) {
+				if (!c.cwd) continue;
+				const normC = normalizeSessionPathKey(c.cwd);
+				if (removedProjectAt[normC]) continue;
+				if (!seen.has(normC)) {
+					seen.add(normC);
+					list.push({ path: c.cwd, lastUsed: Date.now() });
+				}
 			}
-		}
-		for (const e of elsewhere) {
-			if (!e.cwd) continue;
-			const normC = normalizeSessionPathKey(e.cwd);
-			if (!seen.has(normC)) {
-				seen.add(normC);
-				list.push({ path: e.cwd, lastUsed: Date.now() });
+			for (const e of elsewhere) {
+				if (!e.cwd) continue;
+				const normC = normalizeSessionPathKey(e.cwd);
+				if (removedProjectAt[normC]) continue;
+				if (!seen.has(normC)) {
+					seen.add(normC);
+					list.push({ path: e.cwd, lastUsed: Date.now() });
+				}
 			}
 		}
 		return list;
-	}, [projects, conversations, elsewhere]);
+	}, [projects, conversations, elsewhere, singleProjectFocus, removedProjectAt]);
 
 	// 2. 方案 A：会话内位置锁定（Deferred MRU · 稳定空间记忆）
 	// 按项目初次呈现时的 Rank 锁定相对排位，用户在当前窗口点击切换时绝对在原地展开，不发生动态瞬移
@@ -2207,11 +2220,22 @@ export const LeftPanel = memo(function LeftPanel({
 							<button
 								type="button"
 								className={`lp-section-action lp-project-action ${workspaceMenuOpen ? "active" : ""}`}
-								title={workspaceMenuOpen ? undefined : t("openProject")}
-								aria-label={t("openProject")}
+								title={
+									sidebarMode === "chat"
+										? "新建 Chat 项目"
+										: workspaceMenuOpen
+											? undefined
+											: t("openProject")
+								}
+								aria-label={sidebarMode === "chat" ? "新建 Chat 项目" : t("openProject")}
 								aria-expanded={workspaceMenuOpen}
 								onClick={(e) => {
 									e.stopPropagation();
+									if (sidebarMode === "chat") {
+										if (collapseProjects) toggleProjects();
+										window.dispatchEvent(new CustomEvent("pi-web-ui:open-new-chat-project"));
+										return;
+									}
 									setWorkspaceMenuOpen((prev) => !prev);
 								}}
 							>
@@ -2352,7 +2376,6 @@ export const LeftPanel = memo(function LeftPanel({
 											<div className="lp-project-node" key={p.path}>
 												<div
 													className={`lp-row lp-project-head-row${hasRunning ? " has-running" : ""}${hasUnread ? " has-unread" : ""}`}
-													onMouseLeave={() => setConfirmDel((k) => (k === `proj:${p.path}` ? null : k))}
 													onContextMenu={(e) => openProjectMenu(e, p)}
 												>
 													<button
@@ -2367,8 +2390,12 @@ export const LeftPanel = memo(function LeftPanel({
 														onClick={() => {
 															if (switching) return;
 															if (singleProjectFocus) {
-																// 单项目聚焦：点开另一个项目时，立即把上一个打开的项目收起来，并展开当前要打开的项目
-																if (isExpanded) return;
+																// 单项目聚焦：已展开时再次点击直接收起；点击另一个项目时自动收起上一个项目并展开当前项目
+																if (isExpanded) {
+																	setFocusedProjectNorm(null);
+																	setCollapsedCurrentProjects((prev) => new Set(prev).add(pNorm));
+																	return;
+																}
 																setFocusedProjectNorm(pNorm);
 																setCollapsedCurrentProjects((prev) => {
 																	const next = new Set(prev);
@@ -2416,33 +2443,46 @@ export const LeftPanel = memo(function LeftPanel({
 															focusComposer();
 														}}
 													>
-														{(!singleProjectFocus || !isCollapsed) && (
-															<span
-																className="lp-project-chevron"
-																onClick={(e) => {
-																	e.stopPropagation();
-																	if (singleProjectFocus) {
-																		// 收起当前项目并退出观看
+														<span
+															className="lp-project-chevron"
+															onClick={(e) => {
+																e.stopPropagation();
+																if (singleProjectFocus) {
+																	if (isCollapsed) {
+																		setFocusedProjectNorm(pNorm);
+																		setCollapsedCurrentProjects((prev) => {
+																			const next = new Set(prev);
+																			next.delete(pNorm);
+																			return next;
+																		});
+																		if (!active) {
+																			panelSend({ type: "set_cwd", path: p.path });
+																			panelSend({ type: "list_sessions", path: p.path });
+																			setLoadingProjects((lp) => new Set(lp).add(pNorm));
+																		} else {
+																			panelSend({ type: "list_sessions" });
+																		}
+																	} else {
 																		setFocusedProjectNorm(null);
 																		setCollapsedCurrentProjects((prev) => new Set(prev).add(pNorm));
 																		onExitProject?.(p.path);
-																		return;
 																	}
-																	toggleProjectExpand(p.path);
-																}}
-																title={isCollapsed ? t("expandSection") : t("collapseSection")}
+																	return;
+																}
+																toggleProjectExpand(p.path);
+															}}
+															title={isCollapsed ? t("expandSection") : t("collapseSection")}
+														>
+															<svg
+																width="11"
+																height="11"
+																viewBox="0 0 12 12"
+																fill="currentColor"
+																style={{ display: "block" }}
 															>
-																<svg
-																	width="11"
-																	height="11"
-																	viewBox="0 0 12 12"
-																	fill="currentColor"
-																	style={{ display: "block" }}
-																>
-																	<path d={isCollapsed ? "M4 2.5v7l5-3.5z" : "M2.5 4h7l-3.5 5z"} />
-																</svg>
-															</span>
-														)}
+																<path d={isCollapsed ? "M4 2.5v7l5-3.5z" : "M2.5 4h7l-3.5 5z"} />
+															</svg>
+														</span>
 														{switching ? (
 															<HalfRingSpinner className="project-icon spin" />
 														) : sbx ? (
@@ -2487,36 +2527,65 @@ export const LeftPanel = memo(function LeftPanel({
 														>
 															<FiPlus />
 														</button>
-														<button
-															type="button"
-															className={`lp-project-btn lp-project-del-btn ${confirmDel === `proj:${p.path}` ? "confirm danger" : ""}`}
-															title={
-																confirmDel === `proj:${p.path}`
-																	? sbx
-																		? t("sandboxActionDestroy")
-																		: t("deleteProjectConfirm")
-																	: sbx
-																		? t("sandboxActionDestroyTip")
-																		: t("deleteProject")
-															}
-															onClick={(e) => {
-																e.stopPropagation();
-																if (confirmDel === `proj:${p.path}`) {
-																	setConfirmDel(null);
-																	clearLastCwdIfMatches(p.path);
-																	clearCachedProject(p.path);
-																	panelSend(
-																		sbx
-																			? { type: "destroy_sandbox", path: p.path }
-																			: { type: "remove_project", path: p.path },
-																	);
-																} else {
-																	setConfirmDel(`proj:${p.path}`);
+														{!p.path.replace(/\\/g, "/").endsWith("/chat-space") && (
+															<button
+																type="button"
+																data-testid={`delete-project-${dispName}`}
+																className={`lp-project-btn lp-project-del-btn ${confirmDel === `proj:${p.path}` ? "confirm danger" : ""}`}
+																style={
+																	confirmDel === `proj:${p.path}`
+																		? {
+																				width: "auto",
+																				padding: "0 7px",
+																				fontSize: "11px",
+																				fontWeight: 600,
+																				opacity: 1,
+																				background: "var(--red, #ef4444)",
+																				color: "#fff",
+																				borderRadius: "6px",
+																			}
+																		: undefined
 																}
-															}}
-														>
-															{confirmDel === `proj:${p.path}` ? <FiCheck /> : <FiTrash2 />}
-														</button>
+																title={
+																	confirmDel === `proj:${p.path}`
+																		? sbx
+																			? t("sandboxActionDestroy")
+																			: t("deleteProjectConfirm")
+																		: sbx
+																			? t("sandboxActionDestroyTip")
+																			: t("deleteProject")
+																}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	if (confirmDel === `proj:${p.path}`) {
+																		setConfirmDel(null);
+																		setRemovedProjectAt((prev) => ({
+																			...prev,
+																			[pNorm]: Date.now() + 2000,
+																		}));
+																		if (focusedProjectNorm === pNorm) {
+																			setFocusedProjectNorm(null);
+																		}
+																		clearLastCwdIfMatches(p.path);
+																		clearCachedProject(p.path);
+																		window.dispatchEvent(
+																			new CustomEvent("pi-web-ui:project-removed", {
+																				detail: { path: p.path },
+																			}),
+																		);
+																		panelSend(
+																			sbx
+																				? { type: "destroy_sandbox", path: p.path }
+																				: { type: "remove_project", path: p.path },
+																		);
+																	} else {
+																		setConfirmDel(`proj:${p.path}`);
+																	}
+																}}
+															>
+																{confirmDel === `proj:${p.path}` ? "确认删除" : <FiTrash2 />}
+															</button>
+														)}
 														{renderInlineEntries(uiLeftProject, "lp-slot-project", {
 															id: p.path,
 															kind: "project",
