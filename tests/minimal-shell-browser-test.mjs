@@ -195,6 +195,30 @@ async function main() {
 	await page.waitForSelector(".goalbar", { state: "visible", timeout: 5000 });
 	check("命令面板「目标」展开 .goalbar", await page.isVisible(".goalbar"));
 
+	console.log("8.5. 独立对话空间 + 分级记忆与跨端同步弹窗 + 应用名 PI");
+	check("窗口标题使用简洁名称 PI", (await page.title()).includes("PI"));
+	check("侧栏顶部常驻「独立对话 + 共享记忆」入口", await page.isVisible('[data-testid="chat-space-header"]'));
+	await page.click('[data-testid="open-memory-modal"]');
+	await page.waitForSelector('[data-testid="memory-modal"]', { timeout: 5000 });
+	check("点击打开记忆与跨端同步弹窗", true);
+	await page.fill('[data-testid="mem-global-input"]', "偏好使用极简 TypeScript 代码风格");
+	await page.click('[data-testid="mem-global-add"]');
+	await sleep(300);
+	check(
+		"成功添加全局共享记忆条目",
+		(await page.locator(".mem-row .mem-text").first().textContent())?.includes("TypeScript"),
+	);
+	await page.click('[data-testid="toggle-memory-isolated"]');
+	await sleep(300);
+	check(
+		"一键切换当前对话为「独立记忆」",
+		await page.locator('[data-testid="open-memory-modal"]').evaluate((el) => el.classList.contains("isolated")),
+	);
+	await page.click('[data-testid="toggle-memory-isolated"]');
+	await sleep(200);
+	await page.keyboard.press("Escape");
+	await sleep(200);
+
 	console.log("9. 手机宽度");
 	await page.setViewportSize({ width: 390, height: 800 });
 	await sleep(500);

@@ -68,6 +68,7 @@ import { useUpdatePanel } from "./components/update-panel";
 import { LocaleModal } from "./components/LocaleModal";
 import { Modal } from "./components/Modal";
 import { SidebarFooter, type SidebarFooterItem } from "./components/SidebarFooter";
+import { ChatSpaceHeader, MemoryModal, useMemoryState } from "./components/MemoryModal";
 import { useShellPrefs } from "./shell-mode";
 import type { PaletteCommand } from "./command-palette";
 import { IconEditor } from "./components/IconEditor";
@@ -415,7 +416,8 @@ export function App() {
 
 	useEffect(() => {
 		const name = projectTitle ? projectNameFromCwd(cwd) : "";
-		const base = name ? `${name} — pi-web-ui` : t("docTitle");
+		const isMin = document.documentElement.dataset.shell !== "classic";
+		const base = isMin ? (name ? `${name} — PI` : "PI") : name ? `${name} — pi-web-ui` : t("docTitle");
 		document.title = instanceName ? `[${instanceName}] ${base}` : base;
 	}, [cwd, projectTitle, instanceName, t]);
 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -535,6 +537,9 @@ export function App() {
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [localeModalOpen, setLocaleModalOpen] = useState(false);
 	const [updateModalOpen, setUpdateModalOpen] = useState(false);
+	const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+	const activeSessionKey = chat.state?.sessionId || chat.activeConversationId || chat.state?.conversationId || "";
+	const { memory, setMemory, toggleIsolated } = useMemoryState(cwd, activeSessionKey, memoryModalOpen);
 	const refreshWorktrees = useCallback(() => send({ type: "refresh_worktrees" }), [send]);
 	useWorktreeRefresh(chat.state?.worktree?.mainPath, refreshWorktrees);
 	const pendingWorktreeSwitch = useRef<{ source: string; target: string } | null>(null);
@@ -2383,6 +2388,21 @@ export function App() {
 		},
 		[handleViewChange, send],
 	);
+	const enterChatSpace = useCallback(() => {
+		const target = memory.view?.chatSpaceCwd;
+		if (!target) return;
+		handleViewChange("chat");
+		if (cwd !== target) send({ type: "set_cwd", path: target });
+	}, [memory.view?.chatSpaceCwd, cwd, handleViewChange, send]);
+
+	const newStandaloneChat = useCallback(() => {
+		const target = memory.view?.chatSpaceCwd;
+		handleViewChange("chat");
+		if (target && cwd !== target) send({ type: "set_cwd", path: target });
+		send({ type: "new_chat" });
+		focusComposer();
+	}, [memory.view?.chatSpaceCwd, cwd, handleViewChange, send]);
+
 	const paletteCommands = useMemo<PaletteCommand[]>(() => {
 		if (!minimal) return [];
 		const G = {
@@ -2397,6 +2417,29 @@ export function App() {
 		const mod = document.body.classList.contains("is-desktop-mac") ? "⌘" : "Ctrl+";
 		const cmds: PaletteCommand[] = [
 			{ id: "new-chat", group: G.chat, label: t("newChat"), keywords: ["new chat"], run: () => newChat() },
+			{
+				id: "standalone-chat",
+				group: G.chat,
+				label: isZhLocale(locale) ? "进入独立对话空间 (Chats)" : "Standalone Chats",
+				keywords: ["chat", "standalone", "inbox"],
+				checked: Boolean(memory.view?.isChatSpace),
+				run: enterChatSpace,
+			},
+			{
+				id: "memory-modal",
+				group: G.chat,
+				label: isZhLocale(locale) ? "记忆与跨端云同步" : "Memory & Cloud Sync",
+				keywords: ["memory", "sync", "github", "remember"],
+				run: () => setMemoryModalOpen(true),
+			},
+			{
+				id: "toggle-memory-isolated",
+				group: G.chat,
+				label: isZhLocale(locale) ? "当前对话：独立记忆（不读写共享记忆）" : "Isolate Memory for This Chat",
+				keywords: ["isolated", "memory", "private"],
+				checked: memory.isolated,
+				run: () => void toggleIsolated(),
+			},
 			...(chat.engine === "dsh"
 				? []
 				: [
@@ -2646,6 +2689,33 @@ export function App() {
 		isMobile,
 	]);
 	// Cmd/Ctrl+,  打开设置（极简外壳没有常驻设置按钮）
+	const sidebarHeader = useMemo(() => {
+		if (!minimal) return undefined;
+		const memCount =
+			(memory.view?.globalItems.filter((i) => i.enabled).length ?? 0) +
+			(memory.view?.projectItems.filter((i) => i.enabled).length ?? 0);
+		return (
+			<ChatSpaceHeader
+				isChatSpace={Boolean(memory.view?.isChatSpace)}
+				memoryCount={memCount}
+				isolated={memory.isolated}
+				synced={Boolean(memory.sync?.loggedIn)}
+				onEnterChatSpace={enterChatSpace}
+				onNewStandaloneChat={newStandaloneChat}
+				onOpenMemoryModal={() => setMemoryModalOpen(true)}
+			/>
+		);
+	}, [
+		minimal,
+		memory.view?.globalItems,
+		memory.view?.projectItems,
+		memory.view?.isChatSpace,
+		memory.isolated,
+		memory.sync?.loggedIn,
+		enterChatSpace,
+		newStandaloneChat,
+	]);
+
 	const sidebarFooter = useMemo(() => {
 		if (!minimal) return undefined;
 		const items: SidebarFooterItem[] = paletteCommands
@@ -2916,7 +2986,10 @@ export function App() {
 						>
 							<LeftPanel
 								collapsible={!isMobile && !minimal}
+								headerSlot={sidebarHeader}
 								footer={sidebarFooter}
+								singleProjectFocus={minimal}
+								onExitProject={() => enterChatSpace()}
 								onToggleCollapse={toggleLeft}
 								panelSend={panelSend}
 								active={!isMobile || drawer === "left"}
@@ -2925,7 +2998,15 @@ export function App() {
 								conversations={chat.conversations}
 								elsewhere={chat.elsewhere}
 								sessions={chat.sessions}
-								projects={chat.projects}
+								projects={
+									minimal && memory.view?.chatSpaceCwd
+										? chat.projects.filter(
+												(p) =>
+													p.path.replace(/\\/g, "/").toLowerCase() !==
+													memory.view!.chatSpaceCwd.replace(/\\/g, "/").toLowerCase(),
+											)
+										: chat.projects
+								}
 								projectSessions={chat.projectSessions}
 								engine={chat.engine}
 								pathCompletions={chat.pathCompletions}
@@ -3643,6 +3724,20 @@ export function App() {
 				/>
 			)}
 			{localeModalOpen && <LocaleModal onClose={() => setLocaleModalOpen(false)} />}
+			{memoryModalOpen && (
+				<MemoryModal
+					open={memoryModalOpen}
+					cwd={cwd}
+					sessionId={activeSessionKey}
+					memory={memory}
+					setMemory={setMemory}
+					onClose={() => setMemoryModalOpen(false)}
+					onSwitchCwd={(targetCwd) => {
+						setMemoryModalOpen(false);
+						send({ type: "set_cwd", path: targetCwd });
+					}}
+				/>
+			)}
 			{updateModalOpen && (
 				<Modal
 					onClose={() => setUpdateModalOpen(false)}

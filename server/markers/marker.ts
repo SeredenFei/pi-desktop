@@ -32,6 +32,10 @@ export interface MarkerContext {
 	notify(text: string, level?: "info" | "warning" | "error", textEn?: string): void;
 	/** 重命名当前对话（rename 标记专用）。 */
 	renameConversation?(title: string): void;
+	/** 读写共享记忆库（memory 标记专用；当前对话若开启独立记忆则返回 false）。 */
+	applyMemoryOp?(
+		action: { op: "add"; scope: "global" | "project"; text: string } | { op: "forget"; id: string },
+	): boolean;
 }
 
 export interface MarkerTool<State = unknown> {
@@ -80,6 +84,7 @@ export const BUILTIN_MARKER_TOOLS: ReadonlySet<string> = new Set([
 	"title",
 	"action",
 	"suggest",
+	"memory",
 ]);
 
 const knownMarkerTools = new Set<string>(BUILTIN_MARKER_TOOLS);

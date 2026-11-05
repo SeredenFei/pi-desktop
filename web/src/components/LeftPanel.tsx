@@ -153,6 +153,12 @@ interface LeftPanelProps {
 	onOpenSandboxModal?: () => void;
 	/** 极简外壳（redesign P2）：侧栏底部固定区（「更多」视图入口 + 设置）。经典布局不传。 */
 	footer?: ReactNode;
+	/** 极简外壳（redesign P3）：侧栏顶部固定区（「💬 独立对话」+「🧠 记忆」快捷入口）。 */
+	headerSlot?: ReactNode;
+	/** 单项目聚焦模式：平时只显示大项目行（无展开小箭头），双击项目才进入并展开对话列表；展开后点收起即退出观看该项目。 */
+	singleProjectFocus?: boolean;
+	/** 单项目聚焦模式下点击「收起」退出当前项目时的回调。 */
+	onExitProject?: (projectPath: string) => void;
 }
 
 function formatModified(ts: number): string {
@@ -386,6 +392,9 @@ export const LeftPanel = memo(function LeftPanel({
 	transition,
 	onOpenSandboxModal,
 	footer,
+	headerSlot,
+	singleProjectFocus = false,
+	onExitProject,
 }: LeftPanelProps) {
 	const t = useT();
 	const capabilities = useEngineCapabilities();
@@ -2257,7 +2266,10 @@ export const LeftPanel = memo(function LeftPanel({
 										const pNorm = normalizeSessionPathKey(p.path);
 										const curNorm = normalizeSessionPathKey(currentCwd);
 										const active = pNorm === curNorm;
-										const isExpanded = isProjectExpanded(p.path);
+										// 单项目聚焦模式：只有当前选中的项目（active）且未手动收起时才展开子对话列表；非当前项目一律折叠且不渲染小箭头
+										const isExpanded = singleProjectFocus
+											? active && !collapsedCurrentProjects.has(pNorm)
+											: isProjectExpanded(p.path);
 										const isCollapsed = !isExpanded;
 										const switching =
 											transition?.kind === "cwd" && normalizeSessionPathKey(transition.target) === pNorm;
@@ -2338,15 +2350,30 @@ export const LeftPanel = memo(function LeftPanel({
 														}
 														disabled={switching}
 														onClick={() => {
-															if (!switching) {
-																// 单击项目行只秒速展开/折叠该项目的历史会话（几毫秒），不触发耗时数秒的 set_cwd 重建智能体 Runtime；
-																// 点击项目下的具体会话、双击项目行或点右侧 + 新建对话时才切换工作区。
-																toggleProjectExpand(p.path);
+															if (switching) return;
+															if (singleProjectFocus) {
+																// 单项目聚焦模式：单击不展开也不切换，双击才进入并展开
+																return;
 															}
+															if (!active) panelSend({ type: "set_cwd", path: p.path });
+															toggleProjectExpand(p.path);
 														}}
 														onDoubleClick={(e) => {
 															e.stopPropagation();
 															if (switching) return;
+															if (singleProjectFocus) {
+																// 双击项目：进入该项目并展开它的对话列表
+																setCollapsedCurrentProjects((prev) => {
+																	const next = new Set(prev);
+																	next.delete(pNorm);
+																	return next;
+																});
+																if (!active) {
+																	panelSend({ type: "set_cwd", path: p.path });
+																}
+																panelSend({ type: "list_sessions" });
+																return;
+															}
 															if (active) {
 																panelSend({ type: "new_chat" });
 															} else {
@@ -2356,24 +2383,32 @@ export const LeftPanel = memo(function LeftPanel({
 															focusComposer();
 														}}
 													>
-														<span
-															className="lp-project-chevron"
-															onClick={(e) => {
-																e.stopPropagation();
-																toggleProjectExpand(p.path);
-															}}
-															title={isCollapsed ? t("expandSection") : t("collapseSection")}
-														>
-															<svg
-																width="11"
-																height="11"
-																viewBox="0 0 12 12"
-																fill="currentColor"
-																style={{ display: "block" }}
+														{(!singleProjectFocus || !isCollapsed) && (
+															<span
+																className="lp-project-chevron"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	if (singleProjectFocus) {
+																		// 收起并退出观看该项目
+																		setCollapsedCurrentProjects((prev) => new Set(prev).add(pNorm));
+																		onExitProject?.(p.path);
+																		return;
+																	}
+																	toggleProjectExpand(p.path);
+																}}
+																title={isCollapsed ? t("expandSection") : t("collapseSection")}
 															>
-																<path d={isCollapsed ? "M4 2.5v7l5-3.5z" : "M2.5 4h7l-3.5 5z"} />
-															</svg>
-														</span>
+																<svg
+																	width="11"
+																	height="11"
+																	viewBox="0 0 12 12"
+																	fill="currentColor"
+																	style={{ display: "block" }}
+																>
+																	<path d={isCollapsed ? "M4 2.5v7l5-3.5z" : "M2.5 4h7l-3.5 5z"} />
+																</svg>
+															</span>
+														)}
 														{switching ? (
 															<HalfRingSpinner className="project-icon spin" />
 														) : sbx ? (
@@ -2456,8 +2491,10 @@ export const LeftPanel = memo(function LeftPanel({
 													</div>
 												</div>
 
-												{/* 智能半折叠：折叠时仅隐藏历史（有正在运行或完成未查看则常驻可见），展开时始终呈现 */}
-												{((isCollapsed && (pRunningRows.length > 0 || hasUnread)) || !isCollapsed) && (
+												{/* 智能半折叠：单项目聚焦模式下仅在展开态渲染子列表；常规模式保持原有半折叠 */}
+												{(singleProjectFocus
+													? !isCollapsed
+													: (isCollapsed && (pRunningRows.length > 0 || hasUnread)) || !isCollapsed) && (
 													<div className="lp-project-tree-children">
 														{/* 1. 活动对话与完整子代理层级树（带折叠实心三角、深度缩进、子代理徽标） */}
 														{pRunningRows.map((row) => renderSingleConvRow(row, p.path))}
@@ -2575,6 +2612,7 @@ export const LeftPanel = memo(function LeftPanel({
 					<FiChevronLeft />
 				</button>
 			)}
+			{headerSlot}
 			{effectivePlan.map(({ key }) => (
 				<Fragment key={key}>
 					{renderSection(key)}

@@ -110,6 +110,7 @@ import {
 } from "./goal-service.js";
 import { buildEvidenceDigest, sessionMessagesOf } from "./goal-evidence.js";
 import { MarkerService } from "./marker-service.js";
+import { getMemoryStore } from "./memory-store.js";
 import { discoverDiskSkills, mergeSkillCollections, readSkillInstruction } from "./skill-discovery.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
 import { ModelAdminService } from "./model-admin.js";
@@ -3568,6 +3569,22 @@ export class ClientSession {
 				// 复用现有重命名路径（内存标题 + 磁盘 session_info）
 				void this.renameConversation(convId, title);
 			},
+			applyMemoryOp: (convId, action) => {
+				const mem = getMemoryStore(this.stateStore?.dataDir);
+				if (!mem) return false;
+				const conv = this.convs.get(convId);
+				const sessionKey = conv?.session?.sessionId || convId;
+				if (mem.isSessionIsolated(sessionKey)) return false;
+				const targetCwd = conv?.cwd || this.cwd;
+				if (action.op === "add") {
+					mem.addItem(action.scope, action.text, targetCwd);
+					return true;
+				}
+				if (action.op === "forget") {
+					return mem.deleteItem("project", action.id, targetCwd) || mem.deleteItem("global", action.id);
+				}
+				return false;
+			},
 			// 标记 widget 合并进扩展 widget 里，跟随当前活动会话渲染（切换会话即刷新）。
 			refreshMarkers: () => this.webUi.refresh(),
 			onActionsChange: (convId) => {
@@ -4152,6 +4169,16 @@ export class ClientSession {
 						// 内置标记工具引导（按总开关/分组开关过滤）
 						const markerGuidance = this.markerSvc.buildGuidance();
 						if (markerGuidance) out.push(markerGuidance);
+						// 分级共享记忆注入（全局记忆 + 当前项目记忆 + 项目自定义指令；会话开启「独立记忆」时跳过）
+						const mem = getMemoryStore(this.stateStore?.dataDir);
+						if (mem) {
+							const ownerConv = this.convs.get(ownerId ?? "");
+							const sessionKey = ownerConv?.session?.sessionId || sessionManager.getSessionId() || ownerId;
+							if (!mem.isSessionIsolated(sessionKey)) {
+								const memBlock = mem.buildPromptInjection(realCwd);
+								if (memBlock) out.push(memBlock);
+							}
+						}
 						return out;
 					},
 				});

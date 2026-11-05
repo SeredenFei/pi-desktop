@@ -34,6 +34,10 @@ export interface MarkerHost {
 		conversationId: string,
 	) => { getBranch: () => unknown[]; appendCustomEntry?: (t: string, d: unknown) => unknown } | undefined;
 	renameConversation: (conversationId: string, title: string) => void;
+	applyMemoryOp?: (
+		conversationId: string,
+		action: { op: "add"; scope: "global" | "project"; text: string } | { op: "forget"; id: string },
+	) => boolean;
 	/** 触发一次标记 widget 重绘（宿主把它接到扩展 widget 合并里，跟随当前活动会话）。 */
 	refreshMarkers: () => void;
 	/** 建议操作变更回调（用于快照/增量同步到客户端）。 */
@@ -226,6 +230,9 @@ export class MarkerService {
 				renameConversation: (title: string) => {
 					this.host.renameConversation(conversationId, title);
 				},
+				applyMemoryOp: this.host.applyMemoryOp
+					? (action) => this.host.applyMemoryOp!(conversationId, action)
+					: undefined,
 			};
 			let result;
 			try {
@@ -246,7 +253,7 @@ export class MarkerService {
 			if (result.applied) {
 				// action 落库；notify/conv 即时生效（通知已发 / 对话已重命名），无需快照。
 				const canonicalTool = token.tool === "suggest" ? ACTION_NAMESPACE : token.tool;
-				if (canonicalTool !== "notify" && canonicalTool !== "conv") {
+				if (canonicalTool !== "notify" && canonicalTool !== "conv" && canonicalTool !== "memory") {
 					dirty.add(canonicalTool);
 				}
 			} else if (result.error) {

@@ -1,6 +1,6 @@
 # electron-builder 配置（桌面版专用，网页版/npm 包不受影响）
 appId: com.xingshuyin.pi-web-ui-desktop
-productName: pi-web-ui-desktop
+productName: PI
 directories:
   output: release
 files:

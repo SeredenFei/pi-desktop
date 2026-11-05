@@ -24,9 +24,11 @@ if "%PI_CP%"=="936"   set "PI_LANG=.gbk"
 if "%PI_CP%"=="65001" set "PI_LANG=.utf8"
 
 rem ----- fatal checks: main app executable -----
-if not exist "%PI_ROOT%\app\pi-web-ui-desktop.exe" (
+set "PI_EXE=%PI_ROOT%\app\PI.exe"
+if not exist "%PI_EXE%" set "PI_EXE=%PI_ROOT%\app\pi-web-ui-desktop.exe"
+if not exist "%PI_EXE%" (
     echo.
-    echo [Pi] ERROR: app\pi-web-ui-desktop.exe not found.
+    echo [Pi] ERROR: app\PI.exe not found.
     echo      The portable folder is incomplete.
     call :print_detail fatal-app
     goto :fail
@@ -82,8 +84,8 @@ set "USERPROFILE=%PI_ROOT%\data\home"
 
 call :print_detail run-info
 
-echo [Pi] Launching Pi Web UI Desktop...
-start "" "%PI_ROOT%\app\pi-web-ui-desktop.exe" --user-data-dir="%PI_ROOT%\data\electron" %*
+echo [Pi] Launching PI Desktop...
+start "" "%PI_EXE%" --user-data-dir="%PI_ROOT%\data\electron" %*
 exit /b 0
 
 :print_detail

@@ -409,6 +409,300 @@
 		border-radius: var(--radius-md);
 		box-shadow: 0 10px 30px var(--glow-18);
 	}
+
+	/* ───────────────────────── 9. 侧栏顶部「独立对话 / 记忆」与记忆管理弹窗 ───────────────────────── */
+	.shell-minimal .cs-header {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 8px 8px 4px;
+	}
+	.shell-minimal .cs-space-row {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		border-radius: var(--radius-sm);
+		transition: background var(--dur) var(--ease);
+	}
+	.shell-minimal .cs-space-row.active {
+		background: var(--bg-elev2);
+	}
+	.shell-minimal .cs-space-row:hover {
+		background: var(--bg-elev2);
+	}
+	.shell-minimal .cs-space-main {
+		flex: 1;
+		min-width: 0;
+		height: 30px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text);
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.shell-minimal .cs-space-add {
+		width: 26px;
+		height: 26px;
+		margin-right: 2px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text-dim);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+	}
+	.shell-minimal .cs-space-add:hover {
+		background: var(--border-soft);
+		color: var(--text);
+	}
+	.shell-minimal .cs-memory-btn {
+		height: 30px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text-dim);
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 12.5px;
+		cursor: pointer;
+		transition: background var(--dur) var(--ease);
+	}
+	.shell-minimal .cs-memory-btn:hover {
+		background: var(--bg-elev2);
+		color: var(--text);
+	}
+	.shell-minimal .cs-memory-btn.isolated {
+		color: var(--amber);
+	}
+	.shell-minimal .cs-badge {
+		margin-left: auto;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: var(--bg-elev2);
+		color: var(--text-dim);
+		font-size: 11px;
+		font-family: var(--mono);
+	}
+	.shell-minimal .cs-sync-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--green);
+	}
+
+	/* 记忆与跨端同步弹窗 */
+	html[data-shell="minimal"] .modal.memory-modal {
+		max-width: 680px;
+		width: min(92vw, 680px);
+	}
+	.mem-modal-body {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 10px 14px 16px;
+	}
+	.mem-iso-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-md);
+		background: var(--bg-elev);
+	}
+	.mem-iso-title {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.mem-iso-desc {
+		margin-top: 2px;
+		font-size: 12px;
+		color: var(--text-dim);
+	}
+	.mem-tabs {
+		display: flex;
+		gap: 6px;
+		border-bottom: 1px solid var(--border-soft);
+		padding-bottom: 6px;
+	}
+	.mem-tab {
+		height: 30px;
+		padding: 0 12px;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text-dim);
+		font-size: 13px;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+	}
+	.mem-tab.active {
+		background: var(--bg-elev2);
+		color: var(--text);
+		font-weight: 600;
+	}
+	.mem-pane {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.mem-add-row,
+	.mem-create-proj {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.mem-input,
+	.mem-textarea {
+		flex: 1;
+		min-width: 0;
+		padding: 7px 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--inputbox-bg);
+		color: var(--text);
+		font-size: 13px;
+		font-family: inherit;
+		outline: none;
+	}
+	.mem-input:focus,
+	.mem-textarea:focus {
+		border-color: var(--accent);
+	}
+	.mem-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		max-height: 300px;
+		overflow-y: auto;
+	}
+	.mem-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 10px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		font-size: 13px;
+	}
+	.mem-row.disabled {
+		opacity: 0.5;
+	}
+	.mem-text {
+		flex: 1;
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text);
+	}
+	.mem-icon-btn {
+		width: 26px;
+		height: 26px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text-faint);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+	}
+	.mem-icon-btn:hover {
+		background: var(--bg-elev2);
+		color: var(--text);
+	}
+	.mem-icon-btn.danger:hover {
+		color: var(--red);
+	}
+	.mem-empty {
+		padding: 18px 12px;
+		text-align: center;
+		color: var(--text-faint);
+		font-size: 12.5px;
+	}
+	.mem-sec-label {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-dim);
+		margin-top: 4px;
+	}
+	.mem-sync-card {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-md);
+		background: var(--bg-elev);
+	}
+	.mem-sync-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.mem-sync-user {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 14px;
+		color: var(--text);
+	}
+	.mem-sync-meta,
+	.mem-sync-hint {
+		font-size: 12px;
+		color: var(--text-dim);
+		line-height: 1.5;
+	}
+	.mem-device-box {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 10px;
+		border: 1px dashed var(--accent);
+		border-radius: var(--radius-sm);
+		background: var(--accent-soft);
+	}
+	.mem-device-code-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.mem-device-code {
+		font-family: var(--mono);
+		font-size: 18px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		padding: 4px 10px;
+		border-radius: 6px;
+		background: var(--card-bg);
+		color: var(--accent);
+	}
+	.mem-err {
+		padding: 8px 10px;
+		border-radius: var(--radius-sm);
+		background: var(--red-soft);
+		color: var(--red);
+		font-size: 12.5px;
+	}
 }
 
 /*

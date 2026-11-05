@@ -47,6 +47,8 @@ import { initAttachmentStore, findAttachment } from "./attachment-store.js";
 import { isOfficeFile, OFFICE_MAX_FILE_BYTES, unzipFiles } from "./office-parse.js";
 import { startControlServer } from "./control-socket.js";
 import { wireDesktopIpc } from "./desktop-ipc.js";
+import { getMemoryStore, type MemoryScope } from "./memory-store.js";
+import { MemorySyncService } from "./memory-sync.js";
 import { collectDescendants, listProcesses, sweepSurvivors } from "./process-tree.js";
 import { scheduleUploadCleanup } from "./uploads.js";
 import { ensureWindowsBash, windowsBashDir } from "./ensure-bash.js";
@@ -960,6 +962,131 @@ const USER_THEMES_DIR = join(DATA_DIR, "themes");
 
 app.get("/api/themes", (_req, res) => {
 	res.json({ themes: listThemes(BUILTIN_THEMES_DIR, USER_THEMES_DIR) });
+});
+
+// ── 分级共享记忆（全局 + 项目）与 GitHub 跨端云同步 API ──────────────────────
+const memoryStore = getMemoryStore(DATA_DIR)!;
+const memorySync = new MemorySyncService(DATA_DIR, memoryStore);
+
+function buildMemoryResponse(cwdParam?: unknown, sessionIdParam?: unknown) {
+	const targetCwd = typeof cwdParam === "string" && cwdParam.trim() ? cwdParam.trim() : CWD;
+	const sessionKey = typeof sessionIdParam === "string" && sessionIdParam.trim() ? sessionIdParam.trim() : undefined;
+	return {
+		ok: true,
+		view: memoryStore.getView(targetCwd),
+		isolated: memoryStore.isSessionIsolated(sessionKey),
+		sync: memorySync.getStatus(),
+	};
+}
+
+app.get("/api/memory", (req, res) => {
+	res.setHeader("Cache-Control", "no-cache");
+	res.json(buildMemoryResponse(req.query.cwd, req.query.sessionId));
+});
+
+app.post("/api/memory/item", express.json({ limit: "64kb" }), (req, res) => {
+	try {
+		const body = (req.body ?? {}) as {
+			op?: "add" | "update" | "delete" | "promote";
+			scope?: MemoryScope;
+			id?: string;
+			content?: string;
+			enabled?: boolean;
+			cwd?: string;
+			sessionId?: string;
+		};
+		const scope: MemoryScope = body.scope === "project" ? "project" : "global";
+		const targetCwd = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : CWD;
+		if (body.op === "add") {
+			memoryStore.addItem(scope, String(body.content ?? ""), targetCwd);
+		} else if (body.op === "update" && body.id) {
+			memoryStore.updateItem(
+				scope,
+				String(body.id),
+				{
+					...(typeof body.content === "string" ? { content: body.content } : {}),
+					...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
+				},
+				targetCwd,
+			);
+		} else if (body.op === "delete" && body.id) {
+			memoryStore.deleteItem(scope, String(body.id), targetCwd);
+		} else if (body.op === "promote" && body.id) {
+			const projItems = memoryStore.listActiveItems("project", targetCwd);
+			const found = projItems.find((i) => i.id === body.id);
+			if (found) {
+				memoryStore.addItem("global", found.content);
+				memoryStore.deleteItem("project", found.id, targetCwd);
+			}
+		} else {
+			res.status(400).json({ error: "Invalid memory item operation" });
+			return;
+		}
+		res.json(buildMemoryResponse(targetCwd, body.sessionId));
+	} catch (e) {
+		res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+	}
+});
+
+app.post("/api/memory/instructions", express.json({ limit: "64kb" }), (req, res) => {
+	try {
+		const body = (req.body ?? {}) as { cwd?: string; instructions?: string; sessionId?: string };
+		const targetCwd = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : CWD;
+		memoryStore.setProjectInstructions(targetCwd, String(body.instructions ?? ""));
+		res.json(buildMemoryResponse(targetCwd, body.sessionId));
+	} catch (e) {
+		res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+	}
+});
+
+app.post("/api/memory/chat-project", express.json({ limit: "64kb" }), (req, res) => {
+	try {
+		const body = (req.body ?? {}) as { name?: string; instructions?: string; sessionId?: string };
+		const created = memoryStore.createChatProject(String(body.name ?? ""), String(body.instructions ?? ""));
+		res.json({
+			...buildMemoryResponse(created.path, body.sessionId),
+			created,
+		});
+	} catch (e) {
+		res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+	}
+});
+
+app.post("/api/memory/isolate", express.json({ limit: "16kb" }), (req, res) => {
+	const body = (req.body ?? {}) as { sessionId?: string; isolated?: boolean; cwd?: string };
+	const sessionKey = String(body.sessionId ?? "").trim();
+	if (!sessionKey) {
+		res.status(400).json({ error: "sessionId is required" });
+		return;
+	}
+	memoryStore.setSessionIsolated(sessionKey, Boolean(body.isolated));
+	res.json(buildMemoryResponse(body.cwd, sessionKey));
+});
+
+app.post("/api/memory/sync", express.json({ limit: "32kb" }), async (req, res) => {
+	try {
+		const body = (req.body ?? {}) as {
+			action?: "device-start" | "device-cancel" | "token-login" | "logout" | "sync-now";
+			token?: string;
+			repo?: string;
+			cwd?: string;
+			sessionId?: string;
+		};
+		if (body.action === "device-start") {
+			await memorySync.startDeviceLogin();
+		} else if (body.action === "device-cancel") {
+			memorySync.cancelDeviceFlow();
+		} else if (body.action === "token-login") {
+			await memorySync.loginWithToken(String(body.token ?? ""), body.repo);
+		} else if (body.action === "logout") {
+			memorySync.logout();
+		} else {
+			await memorySync.syncNow();
+		}
+		res.json(buildMemoryResponse(body.cwd, body.sessionId));
+	} catch (e) {
+		res.status(400).json({ error: e instanceof Error ? e.message : String(e), sync: memorySync.getStatus() });
+	}
 });
 // 语言包：核心只随包发布中英，其余按需下载到 <dataDir>/locales/<code>.json。
 // 手工放进去的同名 JSON 也会被识别（离线安装）。PI_WEB_TOKEN 鉴权自动覆盖。
