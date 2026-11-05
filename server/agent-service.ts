@@ -3836,6 +3836,19 @@ export class ClientSession {
 		// the list is non-empty). unref: must not keep the process alive.
 		this.bg.start();
 		this.userTerminals = this.makeUserTerminalManager();
+		const memStore = getMemoryStore(stateStore?.dataDir);
+		if (memStore) {
+			const unsubRemoteMerge = memStore.onRemoteMerge(() => {
+				if (this.disposed) {
+					unsubRemoteMerge();
+					return;
+				}
+				this.invalidateSessionInfos();
+				this.invalidateProjectsCache();
+				void this.pushProjects();
+				void this.refreshSessions();
+			});
+		}
 		if (!ephemeralCleanupScheduled) {
 			ephemeralCleanupScheduled = true;
 			const timer = setTimeout(() => {

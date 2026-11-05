@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { MemoryDocument, MemoryStore } from "./memory-store.js";
+import { sanitizeProjectSlug, type MemoryDocument, type MemoryStore, type TranscriptIndexEntry } from "./memory-store.js";
 
 /** GitHub 官方 OAuth App Public Client ID（支持 Device Flow 申请 repo scope）。 */
 const GITHUB_DEVICE_CLIENT_ID = "178c6fc778ccc68e1d6a";
@@ -343,7 +343,53 @@ export class MemorySyncService {
 		}
 	}
 
-	/** 立即执行一次双向无损合并同步（Pull 远端 → 逐条时间戳合并 → Push 回远端）。 */
+	/** 读取远端单个文本文件（不存在返回 null）。 */
+	private async fetchRemoteFile(
+		acc: MemorySyncAccount,
+		repoPath: string,
+	): Promise<{ sha: string; text: string } | null> {
+		const url = `https://api.github.com/repos/${acc.username}/${acc.repo}/contents/${repoPath}`;
+		const res = await this.ghFetch(url);
+		if (res.status === 404) return null;
+		if (!res.ok) {
+			throw new Error(`读取远端 ${repoPath} 失败（HTTP ${res.status}）`);
+		}
+		const payload = (await res.json()) as { sha?: string; content?: string };
+		const text = payload.content
+			? Buffer.from(payload.content.replace(/\s+/g, ""), "base64").toString("utf8")
+			: "";
+		return { sha: payload.sha || "", text };
+	}
+
+	/** 写入或更新远端单个文本文件。 */
+	private async putRemoteFile(
+		acc: MemorySyncAccount,
+		repoPath: string,
+		text: string,
+		message: string,
+		knownSha?: string,
+	): Promise<void> {
+		const url = `https://api.github.com/repos/${acc.username}/${acc.repo}/contents/${repoPath}`;
+		let sha = knownSha;
+		if (sha === undefined) {
+			const existing = await this.fetchRemoteFile(acc, repoPath).catch(() => null);
+			sha = existing?.sha;
+		}
+		const putRes = await this.ghFetch(url, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				message,
+				content: Buffer.from(text, "utf8").toString("base64"),
+				...(sha ? { sha } : {}),
+			}),
+		});
+		if (!putRes.ok) {
+			throw new Error(`推送远端 ${repoPath} 失败（HTTP ${putRes.status}）`);
+		}
+	}
+
+	/** 立即执行一次双向无损合并同步（Pull 远端索引与增量对话 → 合并落盘 → Push 变更对话与轻量索引）。 */
 	async syncNow(): Promise<MemorySyncStatus> {
 		this.refreshAccountFromDiskIfChanged();
 		if (!this.account) return this.getStatus();
@@ -356,36 +402,77 @@ export class MemorySyncService {
 		try {
 			this.store.captureChatTranscriptsFromDisk(false);
 			await this.ensureRemoteRepo(acc);
-			const fileUrl = `https://api.github.com/repos/${acc.username}/${acc.repo}/contents/${REMOTE_FILE_PATH}`;
-			const getRes = await this.ghFetch(fileUrl);
-			let remoteSha: string | undefined;
-			let mergedDoc: MemoryDocument = this.store.getDocument();
+			const remoteIndexFile = await this.fetchRemoteFile(acc, REMOTE_FILE_PATH);
+			let remoteSha: string | undefined = remoteIndexFile?.sha;
+			let remoteIndexMap: Record<string, TranscriptIndexEntry> = {};
+			const localBefore = this.store.getDocument();
 
-			if (getRes.status === 200) {
-				const payload = (await getRes.json()) as { sha?: string; content?: string; encoding?: string };
-				remoteSha = payload.sha;
-				if (payload.content) {
-					const rawText = Buffer.from(payload.content.replace(/\s+/g, ""), "base64").toString("utf8");
-					const remoteDoc = JSON.parse(rawText) as MemoryDocument;
-					mergedDoc = this.store.mergeRemote(remoteDoc);
+			if (remoteIndexFile?.text) {
+				const remoteDoc = JSON.parse(remoteIndexFile.text) as MemoryDocument;
+				remoteIndexMap = remoteDoc.transcriptIndex ?? {};
+				const remoteTranscripts = { ...(remoteDoc.chatTranscripts ?? {}) };
+
+				// 按需增量拉取远端更新或本机缺失的 transcripts/<sessionId>.jsonl
+				for (const [sid, rMeta] of Object.entries(remoteIndexMap)) {
+					if (!rMeta || remoteTranscripts[sid]?.jsonl) continue;
+					if (remoteDoc.projects?.[rMeta.scopeKey]?.deletedAt) continue;
+					const localTr = localBefore.chatTranscripts?.[sid];
+					const localLines = localTr?.jsonl ? localTr.jsonl.trim().split("\n").length : 0;
+					const needPull =
+						!localTr ||
+						(rMeta.lineCount ?? 0) > localLines ||
+						((rMeta.lineCount ?? 0) === localLines && (rMeta.updatedAt ?? 0) > (localTr.updatedAt ?? 0));
+					if (needPull) {
+						const safeSid = sanitizeProjectSlug(sid);
+						const rf = await this.fetchRemoteFile(acc, `transcripts/${safeSid}.jsonl`).catch(() => null);
+						if (rf?.text) {
+							remoteTranscripts[sid] = {
+								sessionId: rMeta.sessionId || sid,
+								fileName: rMeta.fileName || `${sid}.jsonl`,
+								scopeKey: rMeta.scopeKey || "chat-space",
+								updatedAt: Number(rMeta.updatedAt) || Date.now(),
+								jsonl: rf.text,
+							};
+						}
+					} else if (localTr) {
+						remoteTranscripts[sid] = localTr;
+					}
 				}
-			} else if (getRes.status !== 404) {
-				throw new Error(`读取远端记忆失败（HTTP ${getRes.status}）`);
+				remoteDoc.chatTranscripts = remoteTranscripts;
+				this.store.mergeRemote(remoteDoc);
 			}
 
-			const bodyText = JSON.stringify(mergedDoc, null, "\t");
-			const putRes = await this.ghFetch(fileUrl, {
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					message: `sync memory (${new Date().toISOString()})`,
-					content: Buffer.from(bodyText, "utf8").toString("base64"),
-					...(remoteSha ? { sha: remoteSha } : {}),
-				}),
-			});
-			if (!putRes.ok) {
-				throw new Error(`推送远端记忆失败（HTTP ${putRes.status}）`);
+			// 将本机新增或比远端更新的对话分文件推送到 transcripts/<sessionId>.jsonl
+			const mergedFull = this.store.getDocument();
+			const indexDoc = this.store.getIndexDocument();
+			for (const [sid, tr] of Object.entries(mergedFull.chatTranscripts ?? {})) {
+				if (!tr?.jsonl || indexDoc.projects?.[tr.scopeKey]?.deletedAt) continue;
+				const lMeta = indexDoc.transcriptIndex?.[sid];
+				const rMeta = remoteIndexMap[sid];
+				const needPush =
+					!rMeta ||
+					(lMeta?.lineCount ?? 0) > (rMeta.lineCount ?? 0) ||
+					(lMeta?.updatedAt ?? 0) > (rMeta.updatedAt ?? 0);
+				if (needPush) {
+					const safeSid = sanitizeProjectSlug(sid);
+					await this.putRemoteFile(
+						acc,
+						`transcripts/${safeSid}.jsonl`,
+						tr.jsonl,
+						`sync transcript ${safeSid}`,
+					);
+				}
 			}
+
+			// 推送干净轻量的 memory-store.json（仅含记忆、项目与 transcriptIndex 索引）
+			const bodyText = JSON.stringify(indexDoc, null, "\t");
+			await this.putRemoteFile(
+				acc,
+				REMOTE_FILE_PATH,
+				bodyText,
+				`sync memory (${new Date().toISOString()})`,
+				remoteSha,
+			);
 			acc.lastSyncedAt = Date.now();
 			this.saveAccount();
 		} catch (err) {

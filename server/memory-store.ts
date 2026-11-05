@@ -11,7 +11,7 @@
  * 4. 渲染注入系统提示词的 <user_memory> XML 片段。
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -20,8 +20,11 @@ import { normalizePathKey } from "./client-state.js";
 export const MAX_MEMORY_ITEM_CHARS = 300;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 export const MAX_PROJECT_INSTRUCTIONS_CHARS = 4000;
-export const MAX_SYNCED_CHAT_TRANSCRIPTS = 40;
-export const MAX_TRANSCRIPT_BYTES = 120 * 1024;
+export const MAX_SYNCED_CHAT_TRANSCRIPTS = 60;
+/** 瘦身后的单会话同步上限（512KB 纯对话文本 ≈ 100~150 轮完整问答）。 */
+export const MAX_TRANSCRIPT_BYTES = 512 * 1024;
+/** 磁盘原始会话文件读取上限（10MB，读取后经 compactJsonlForSync 剥离工具 Schema 与签名后通常缩小 85%~92%）。 */
+export const MAX_RAW_SESSION_FILE_BYTES = 10 * 1024 * 1024;
 
 export type MemoryScope = "global" | "project";
 
@@ -63,6 +66,16 @@ export interface SyncedChatTranscript {
 	jsonl: string;
 }
 
+export interface TranscriptIndexEntry {
+	sessionId: string;
+	fileName: string;
+	title: string;
+	scopeKey: string;
+	lineCount: number;
+	messageCount: number;
+	updatedAt: number;
+}
+
 export interface MemoryDocument {
 	version: 1;
 	updatedAt: number;
@@ -70,6 +83,8 @@ export interface MemoryDocument {
 	projects: Record<string, ProjectMemoryBucket>;
 	/** 开启了「🔒 独立记忆（不读写共享记忆）」的会话 ID 列表。 */
 	isolatedSessionIds?: string[];
+	/** 轻量对话索引表（写入 memory-store.json，具体对话内容分文件存放在 transcripts/<sessionId>.jsonl）。 */
+	transcriptIndex?: Record<string, TranscriptIndexEntry>;
 	/** 跨端同步的 Chat 空间（独立对话 + Chat Projects）轻量对话记录。 */
 	chatTranscripts?: Record<string, SyncedChatTranscript>;
 }
@@ -116,9 +131,153 @@ function emptyDocument(): MemoryDocument {
 	};
 }
 
+/**
+ * 对会话 JSONL 进行无损瘦身与跨平台路径脱敏：
+ * 1. 首行 session 的 cwd 替换为占位符（或还原为本机实际路径），消除 Windows/Mac/Linux 路径差异；
+ * 2. 剥离 role="system" 记录中庞大的 sections（含本机绝对路径的系统提示词快照）与 toolsAdded（35KB+ 工具 JSON Schema），
+ *    仅保留 id / parentId / timestamp 空壳，确保 SessionManager 的 parentId 消息链表 100% 不断裂；
+ * 3. 剥离 assistant 消息中无展示价值的加密签名串 thinkingSignature（单轮 10KB+ base64），完整保留 thinking 思考正文与回答正文；
+ * 4. 统计有效消息行数与最新一条记录的真实时间戳，避免跨机下载时文件 mtime 覆盖真实对话时间。
+ */
+export function compactJsonlForSync(
+	rawText: string,
+	targetCwd?: string,
+): { jsonl: string; sessionId: string; lineCount: number; lastTimestamp: number } | null {
+	const rawLines = rawText.split("\n");
+	const outLines: string[] = [];
+	let sessionId = "";
+	let lastTimestamp = 0;
+
+	for (const rawLine of rawLines) {
+		const trimmed = rawLine.trim();
+		if (!trimmed) continue;
+		let obj: Record<string, unknown>;
+		try {
+			obj = JSON.parse(trimmed) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		if (typeof obj.timestamp === "string") {
+			const parsedTs = Date.parse(obj.timestamp);
+			if (Number.isFinite(parsedTs) && parsedTs > lastTimestamp) lastTimestamp = parsedTs;
+		} else if (typeof obj.timestamp === "number" && obj.timestamp > lastTimestamp) {
+			lastTimestamp = obj.timestamp;
+		}
+
+		if (obj.type === "session") {
+			if (typeof obj.id === "string" && obj.id) sessionId = obj.id;
+			if (targetCwd !== undefined) obj.cwd = targetCwd;
+			outLines.push(JSON.stringify(obj));
+			continue;
+		}
+
+		if (obj.type === "message" && obj.message && typeof obj.message === "object") {
+			const msg = { ...(obj.message as Record<string, unknown>) };
+			if (typeof msg.timestamp === "number" && msg.timestamp > lastTimestamp) {
+				lastTimestamp = msg.timestamp;
+			}
+			if (msg.role === "system") {
+				delete msg.sections;
+				delete msg.toolsAdded;
+				msg.content = "";
+				outLines.push(
+					JSON.stringify({
+						type: "message",
+						id: obj.id,
+						parentId: obj.parentId ?? null,
+						timestamp: obj.timestamp,
+						message: msg,
+					}),
+				);
+				continue;
+			}
+			if (Array.isArray(msg.content)) {
+				msg.content = msg.content.map((part) => {
+					if (!part || typeof part !== "object") return part;
+					const p = { ...(part as Record<string, unknown>) };
+					delete p.thinkingSignature;
+					if (p.type === "image" && typeof p.data === "string" && p.data.length > 32768) {
+						delete p.data;
+					}
+					return p;
+				});
+			}
+			outLines.push(
+				JSON.stringify({
+					...obj,
+					message: msg,
+				}),
+			);
+			continue;
+		}
+
+		outLines.push(JSON.stringify(obj));
+	}
+
+	if (!sessionId || outLines.length === 0) return null;
+	return {
+		jsonl: `${outLines.join("\n")}\n`,
+		sessionId,
+		lineCount: outLines.length,
+		lastTimestamp,
+	};
+}
+
 function clampText(raw: string, maxChars: number): string {
 	const trimmed = raw.trim().replace(/\r\n/g, "\n");
 	return trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+}
+
+/** 从便携 JSONL 中提取标题、消息条数与总行数，生成轻量索引条目。 */
+export function buildTranscriptIndexEntry(tr: SyncedChatTranscript): TranscriptIndexEntry {
+	let title = "";
+	let firstUserText = "";
+	let messageCount = 0;
+	const lines = tr.jsonl
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean);
+	for (const line of lines) {
+		if (!line.startsWith("{")) continue;
+		try {
+			const obj = JSON.parse(line) as Record<string, unknown>;
+			if (obj.type === "session_info" && typeof obj.name === "string" && obj.name.trim()) {
+				title = obj.name.trim();
+			} else if (obj.type === "message" && obj.message && typeof obj.message === "object") {
+				const msg = obj.message as Record<string, unknown>;
+				if (msg.role === "user" || msg.role === "assistant") {
+					messageCount++;
+				}
+				if (msg.role === "user" && !firstUserText) {
+					if (typeof msg.content === "string") {
+						firstUserText = msg.content.trim();
+					} else if (Array.isArray(msg.content)) {
+						for (const part of msg.content) {
+							if (part && typeof part === "object" && (part as Record<string, unknown>).type === "text") {
+								const t = String((part as Record<string, unknown>).text ?? "").trim();
+								if (t) {
+									firstUserText = t;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		} catch {
+			/* ignore */
+		}
+	}
+	const finalTitle = (title || firstUserText || tr.sessionId.slice(0, 8)).replace(/\s+/g, " ").slice(0, 80);
+	return {
+		sessionId: tr.sessionId,
+		fileName: tr.fileName,
+		title: finalTitle,
+		scopeKey: tr.scopeKey,
+		lineCount: lines.length,
+		messageCount,
+		updatedAt: tr.updatedAt || 0,
+	};
 }
 
 /** 从 .git/config 提取远端 URL 并归一化（使不同电脑 clone 的同一仓库共享同一个 projectKey）。 */
@@ -306,15 +465,38 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 	for (const sid of allTranscriptIds) {
 		const lt = local.chatTranscripts?.[sid];
 		const rt = remote.chatTranscripts?.[sid];
-		const chosen = lt && rt ? ((rt.updatedAt ?? 0) >= (lt.updatedAt ?? 0) ? rt : lt) : (lt ?? rt);
-		if (chosen && chosen.sessionId && chosen.jsonl && chosen.jsonl.length <= MAX_TRANSCRIPT_BYTES) {
+		let chosen: SyncedChatTranscript | undefined;
+		if (lt && rt) {
+			const lLines = lt.jsonl ? lt.jsonl.trim().split("\n").length : 0;
+			const rLines = rt.jsonl ? rt.jsonl.trim().split("\n").length : 0;
+			if (rLines !== lLines) {
+				chosen = rLines > lLines ? rt : lt;
+			} else {
+				chosen = (rt.updatedAt ?? 0) >= (lt.updatedAt ?? 0) ? rt : lt;
+			}
+		} else {
+			chosen = lt ?? rt;
+		}
+		if (chosen && chosen.sessionId && chosen.jsonl) {
 			if (projects[chosen.scopeKey]?.deletedAt) continue;
-			transcriptList.push(chosen);
+			const compacted = compactJsonlForSync(chosen.jsonl);
+			const cleanJsonl = compacted ? compacted.jsonl : chosen.jsonl;
+			if (cleanJsonl.length <= MAX_TRANSCRIPT_BYTES) {
+				transcriptList.push({
+					...chosen,
+					jsonl: cleanJsonl,
+					updatedAt: Math.max(chosen.updatedAt ?? 0, compacted?.lastTimestamp ?? 0),
+				});
+			}
 		}
 	}
 	transcriptList.sort((a, b) => b.updatedAt - a.updatedAt);
 	for (const t of transcriptList.slice(0, MAX_SYNCED_CHAT_TRANSCRIPTS)) {
 		mergedTranscripts[t.sessionId] = t;
+	}
+	const mergedIndex: Record<string, TranscriptIndexEntry> = {};
+	for (const [sid, t] of Object.entries(mergedTranscripts)) {
+		mergedIndex[sid] = buildTranscriptIndexEntry(t);
 	}
 
 	return {
@@ -325,6 +507,7 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 		isolatedSessionIds: [...new Set([...(local.isolatedSessionIds ?? []), ...(remote.isolatedSessionIds ?? [])])].slice(
 			-500,
 		),
+		transcriptIndex: mergedIndex,
 		chatTranscripts: mergedTranscripts,
 	};
 }
@@ -332,13 +515,16 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 export class MemoryStore {
 	readonly dataDir: string;
 	readonly filePath: string;
+	readonly transcriptsDir: string;
 	private doc: MemoryDocument;
 	private lastDiskMtime = 0;
 	private changeListeners = new Set<() => void>();
+	private remoteMergeListeners = new Set<() => void>();
 
 	constructor(dataDir: string) {
 		this.dataDir = resolve(dataDir);
 		this.filePath = join(this.dataDir, "memory-store.json");
+		this.transcriptsDir = join(this.dataDir, "transcripts");
 		this.doc = this.loadFromDisk();
 		this.ensureChatProjectDirs();
 	}
@@ -348,8 +534,23 @@ export class MemoryStore {
 		return () => this.changeListeners.delete(cb);
 	}
 
+	onRemoteMerge(cb: () => void): () => void {
+		this.remoteMergeListeners.add(cb);
+		return () => this.remoteMergeListeners.delete(cb);
+	}
+
 	private notifyChange(): void {
 		for (const cb of this.changeListeners) {
+			try {
+				cb();
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+
+	private notifyRemoteMerge(): void {
+		for (const cb of this.remoteMergeListeners) {
 			try {
 				cb();
 			} catch {
@@ -368,6 +569,31 @@ export class MemoryStore {
 			}
 			const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<MemoryDocument>;
 			if (!raw || typeof raw !== "object") return emptyDocument();
+			const chatTranscripts: Record<string, SyncedChatTranscript> =
+				raw.chatTranscripts && typeof raw.chatTranscripts === "object" ? { ...raw.chatTranscripts } : {};
+			// 从分文件目录 <dataDir>/transcripts/<sessionId>.jsonl 还原完整对话记录
+			if (raw.transcriptIndex && typeof raw.transcriptIndex === "object") {
+				for (const [sid, meta] of Object.entries(raw.transcriptIndex)) {
+					if (!meta || typeof meta !== "object" || chatTranscripts[sid]?.jsonl) continue;
+					const tf = join(this.transcriptsDir, `${sanitizeProjectSlug(sid)}.jsonl`);
+					if (existsSync(tf)) {
+						try {
+							const jsonl = readFileSync(tf, "utf8");
+							if (jsonl.trim()) {
+								chatTranscripts[sid] = {
+									sessionId: meta.sessionId || sid,
+									fileName: meta.fileName || `${sid}.jsonl`,
+									scopeKey: meta.scopeKey || "chat-space",
+									updatedAt: Number(meta.updatedAt) || 0,
+									jsonl,
+								};
+							}
+						} catch {
+							/* ignore */
+						}
+					}
+				}
+			}
 			return mergeMemoryDocuments(emptyDocument(), {
 				version: 1,
 				updatedAt: Number(raw.updatedAt) || 0,
@@ -376,7 +602,7 @@ export class MemoryStore {
 				isolatedSessionIds: Array.isArray(raw.isolatedSessionIds)
 					? raw.isolatedSessionIds.filter((x): x is string => typeof x === "string")
 					: [],
-				chatTranscripts: raw.chatTranscripts && typeof raw.chatTranscripts === "object" ? raw.chatTranscripts : {},
+				chatTranscripts,
 			});
 		} catch {
 			return emptyDocument();
@@ -397,10 +623,49 @@ export class MemoryStore {
 		}
 	}
 
+	/** 生成只含轻量索引（不含大段内联 jsonl 文本）的 memory-store.json 持久化结构。 */
+	getIndexDocument(): MemoryDocument {
+		this.syncFromDiskIfNewer();
+		const transcriptIndex: Record<string, TranscriptIndexEntry> = {};
+		for (const [sid, tr] of Object.entries(this.doc.chatTranscripts ?? {})) {
+			if (this.doc.projects[tr.scopeKey]?.deletedAt) continue;
+			transcriptIndex[sid] = buildTranscriptIndexEntry(tr);
+		}
+		return {
+			version: 1,
+			updatedAt: this.doc.updatedAt,
+			global: this.doc.global,
+			projects: this.doc.projects,
+			isolatedSessionIds: this.doc.isolatedSessionIds ?? [],
+			transcriptIndex,
+		};
+	}
+
 	private saveToDisk(): void {
 		try {
 			mkdirSync(this.dataDir, { recursive: true });
-			writeFileSync(this.filePath, JSON.stringify(this.doc, null, "\t"), "utf8");
+			mkdirSync(this.transcriptsDir, { recursive: true });
+			const transcriptIndex: Record<string, TranscriptIndexEntry> = {};
+			for (const [sid, tr] of Object.entries(this.doc.chatTranscripts ?? {})) {
+				if (!tr?.jsonl || this.doc.projects[tr.scopeKey]?.deletedAt) continue;
+				transcriptIndex[sid] = buildTranscriptIndexEntry(tr);
+				const tf = join(this.transcriptsDir, `${sanitizeProjectSlug(sid)}.jsonl`);
+				try {
+					writeFileSync(tf, tr.jsonl, "utf8");
+				} catch {
+					/* ignore */
+				}
+			}
+			this.doc.transcriptIndex = transcriptIndex;
+			const diskPayload: MemoryDocument = {
+				version: 1,
+				updatedAt: this.doc.updatedAt,
+				global: this.doc.global,
+				projects: this.doc.projects,
+				isolatedSessionIds: this.doc.isolatedSessionIds ?? [],
+				transcriptIndex,
+			};
+			writeFileSync(this.filePath, JSON.stringify(diskPayload, null, "\t"), "utf8");
 			try {
 				this.lastDiskMtime = statSync(this.filePath).mtimeMs;
 			} catch {
@@ -439,7 +704,7 @@ export class MemoryStore {
 		return JSON.parse(JSON.stringify(this.doc)) as MemoryDocument;
 	}
 
-	/** 与远端文档合并并落盘（返回合并后的文档，同时将远端 Chat 对话记录还原到本地会话目录）。 */
+	/** 与远端文档合并并落盘（返回合并后的文档，同时将远端 Chat 对话记录还原到本地会话目录并通知宿主刷新缓存）。 */
 	mergeRemote(remote: MemoryDocument): MemoryDocument {
 		this.syncFromDiskIfNewer();
 		this.captureChatTranscriptsFromDisk(false);
@@ -447,12 +712,13 @@ export class MemoryStore {
 		this.ensureChatProjectDirs();
 		this.materializeChatTranscriptsToDisk();
 		this.saveToDisk();
+		this.notifyRemoteMerge();
 		return this.getDocument();
 	}
 
 	/**
 	 * 扫描本机 Chat 空间（chat-space 与 chat-projects/*）下的 .jsonl 会话记录，
-	 * 打包进 doc.chatTranscripts 以便随 GitHub 云同步上传。
+	 * 经 compactJsonlForSync 无损瘦身与路径脱敏后打包进 doc.chatTranscripts 以便随 GitHub 云同步上传。
 	 */
 	captureChatTranscriptsFromDisk(notify = true): boolean {
 		this.syncFromDiskIfNewer();
@@ -487,30 +753,26 @@ export class MemoryStore {
 					} catch {
 						continue;
 					}
-					if (st.size === 0 || st.size > MAX_TRANSCRIPT_BYTES) continue;
+					if (st.size === 0 || st.size > MAX_RAW_SESSION_FILE_BYTES) continue;
 					const rawText = readFileSync(fp, "utf8");
-					const nl = rawText.indexOf("\n");
-					const firstLine = (nl >= 0 ? rawText.slice(0, nl) : rawText).trim();
-					if (!firstLine) continue;
-					let header: Record<string, unknown>;
-					try {
-						header = JSON.parse(firstLine) as Record<string, unknown>;
-					} catch {
-						continue;
-					}
-					const sid = typeof header.id === "string" ? header.id : "";
-					if (!sid || this.isSessionIsolated(sid)) continue;
-					header.cwd = t.placeholder;
-					const portableJsonl = JSON.stringify(header) + (nl >= 0 ? rawText.slice(nl) : "\n");
+					const compacted = compactJsonlForSync(rawText, t.placeholder);
+					if (!compacted || this.isSessionIsolated(compacted.sessionId)) continue;
+					if (compacted.jsonl.length > MAX_TRANSCRIPT_BYTES) continue;
+					const sid = compacted.sessionId;
 					const prev = nextMap[sid];
-					const mtime = Math.round(st.mtimeMs);
-					if (!prev || mtime > prev.updatedAt || prev.jsonl.length !== portableJsonl.length) {
+					const mtime = Math.max(Math.round(st.mtimeMs), compacted.lastTimestamp);
+					const prevLines = prev?.jsonl ? prev.jsonl.trim().split("\n").length : 0;
+					if (
+						!prev ||
+						compacted.lineCount > prevLines ||
+						(compacted.lineCount === prevLines && (mtime > prev.updatedAt || prev.jsonl !== compacted.jsonl))
+					) {
 						nextMap[sid] = {
 							sessionId: sid,
 							fileName: f,
 							scopeKey: t.scopeKey,
 							updatedAt: mtime,
-							jsonl: portableJsonl,
+							jsonl: compacted.jsonl,
 						};
 						changed = true;
 					}
@@ -534,13 +796,14 @@ export class MemoryStore {
 
 	/**
 	 * 将 doc.chatTranscripts 中来自其他设备的 Chat 会话记录落盘到本机对应的会话目录，
-	 * 并把首行 cwd 占位符还原为本机的真实目录路径。
+	 * 把首行 cwd 占位符还原为本机的真实目录路径，并同步文件 mtime 为真实对话时间。
 	 */
 	materializeChatTranscriptsToDisk(): void {
 		const map = this.doc.chatTranscripts ?? {};
 		for (const item of Object.values(map)) {
 			try {
 				if (!item?.sessionId || !item?.jsonl || !item?.fileName) continue;
+				if (this.doc.projects[item.scopeKey]?.deletedAt) continue;
 				let localDir: string;
 				if (item.scopeKey === "chat-space") {
 					localDir = resolveChatSpaceDir(this.dataDir);
@@ -556,20 +819,33 @@ export class MemoryStore {
 				const safeFile = basename(item.fileName);
 				if (!safeFile.endsWith(".jsonl")) continue;
 				const destPath = join(sessionDir, safeFile);
+				const incomingCompacted = compactJsonlForSync(item.jsonl, localDir);
+				if (!incomingCompacted) continue;
+
 				if (existsSync(destPath)) {
 					try {
+						const existingRaw = readFileSync(destPath, "utf8");
+						const existingCompacted = compactJsonlForSync(existingRaw, localDir);
+						const existingLines = existingCompacted?.lineCount ?? 0;
 						const st = statSync(destPath);
-						if (Math.round(st.mtimeMs) >= item.updatedAt) continue;
+						// 若本机文件行数更多，或行数相同且本机已是最新的，则不覆盖本机正在进行的会话
+						if (existingLines > incomingCompacted.lineCount) continue;
+						if (existingLines === incomingCompacted.lineCount && Math.round(st.mtimeMs) >= item.updatedAt) {
+							continue;
+						}
 					} catch {
 						/* overwrite */
 					}
 				}
-				const nl = item.jsonl.indexOf("\n");
-				const firstLine = (nl >= 0 ? item.jsonl.slice(0, nl) : item.jsonl).trim();
-				const header = JSON.parse(firstLine) as Record<string, unknown>;
-				header.cwd = localDir;
-				const localJsonl = JSON.stringify(header) + (nl >= 0 ? item.jsonl.slice(nl) : "\n");
-				writeFileSync(destPath, localJsonl, "utf8");
+				writeFileSync(destPath, incomingCompacted.jsonl, "utf8");
+				if (item.updatedAt > 0) {
+					try {
+						const mtimeSec = item.updatedAt / 1000;
+						utimesSync(destPath, mtimeSec, mtimeSec);
+					} catch {
+						/* ignore */
+					}
+				}
 			} catch {
 				/* ignore */
 			}
