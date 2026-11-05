@@ -1,187 +1,134 @@
 <div align="center">
 
-# pi-web-ui
+<img src="./web/public/favicon.svg" width="84" height="84" alt="PI logo" />
 
-A browser and desktop workspace for AI coding agents.
+# PI
 
-**English** · [简体中文](./README.zh-CN.md) · [繁體中文](./README.zh-TW.md)
+**Minimalist cross-platform desktop & web workspace for AI coding and everyday chat.**
 
-[Website](https://xing-shuyin.github.io/pi-web-ui-site/) · [Documentation](https://xing-shuyin.github.io/pi-web-ui-site/docs.html) · [Downloads](https://github.com/xing-shuyin/pi-web-ui/releases/latest)
+**English** · [简体中文](./README.zh-CN.md)
 
-[![npm version](https://img.shields.io/npm/v/pi-web-ui)](https://www.npmjs.com/package/pi-web-ui)
+[Latest Release & Installers](https://github.com/feifeifei527/pi-web-ui/releases/latest) · [Design Plan](./docs/redesign-plan.md) · [Architecture](./docs/architecture-core.md)
+
 [![Node version](https://img.shields.io/node/v/pi-web-ui)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
 
-pi-web-ui brings chat, files, terminals, Git and agent workflows into one workspace. Run it locally in a browser, use the Electron desktop app, or connect to remote SSH projects. The pi SDK and DeepSeek Harness (DSH) have different capabilities; choose the engine and model that suit your task.
+---
 
-## Quick start
+**PI** is a deep redesign and feature evolution built on top of [`xing-shuyin/pi-web-ui`](https://github.com/xing-shuyin/pi-web-ui) (powered by the `@earendil-works/pi-coding-agent` SDK). While preserving the full power of multi-engine coding agents, integrated PTY terminals, Git workflows, Canvas pipelines, and plugins, **PI** reimagines the experience as a clean, single-instance desktop application inspired by **Claude Desktop** and **OpenAI Codex**.
 
-For the command-line version, install **Node.js 22.19.0 or newer**. Desktop installers include their runtime. Git and shell availability affect terminal and repository features.
+---
 
-```bash
-npm install -g pi-web-ui@latest
-cd /path/to/your/project
-pi-web-ui
-```
+## ✨ What's New in This Edition (by [@feifeifei527](https://github.com/feifeifei527))
 
-Open `http://127.0.0.1:8787` if the browser does not open automatically. Configure a model provider and its credentials in workspace settings, select a model, and send your first task. Stop a foreground process with Ctrl+C.
+### 1. Claude + Codex Minimalist UI Redesign
 
-For a first try without a global installation:
+- **Zero-clutter first screen:** Removes the heavy multi-bar cockpit (dual side docks, crowded top bar, and persistent status bar) in favor of a calm three-part layout: **collapsible sidebar + borderless conversation canvas + floating composer**.
+- **Warm adaptive palette:** Built on a dedicated `@layer minimal` design token system with Light (`#FAF9F5`), Dark (`#262624`), and System-following schemes accented by terracotta (`#D97757`).
+- **Hybrid typography:** Assistant responses render directly on the canvas with generous reading rhythm (Claude style), while tool calls, reasoning blocks, code blocks, and diffs use compact monospace rows (Codex style).
+- **Unified Command Palette (`Ctrl/Cmd + K`):** Quick keyboard access to every view (Git, Canvas, Worktrees, Device Center, Plugins), layout toggles, appearance switching, and full-text session/file search.
+- **Bottom Terminal Dock (`Ctrl + \``):** Resizable bottom terminal panel with a compact 32px horizontal tab strip so you can watch live command output while chatting.
 
-```bash
-npx pi-web-ui@latest
-```
+### 2. Standalone Chat Space & Single-Project Focus
 
-If npm blocks native dependency scripts, follow the installed npm version's script-approval instructions. See the [installation guide](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#installation) for platform dependencies and troubleshooting.
+- **Standalone Chats (`💬 独立对话`):** Chat immediately without binding to a local code folder—ideal for everyday Q&A, brainstorming, and writing.
+- **Single-Project Focus Sidebar:** Inactive projects display as clean, single-line rows without visual clutter. **Double-click** a project to enter and expand its conversation history; click the collapse arrow (`▾`) to fold and exit back to Standalone Chats.
+- **Cloud Topic Projects:** Create lightweight topic projects with custom project instructions that sync across machines alongside local Git workspaces.
 
-## Choose an installation
+### 3. Two-Tier Shared Memory, Session Isolation & GitHub Cloud Sync
 
-| Method               | When to use it                                      | Instructions                                                                                                                                                                     |
-| -------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| npm / npx            | Local development or a server with Node.js          | Commands above; [complete guide](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#npm-install)                                                                             |
-| Desktop installers   | A desktop app with an included runtime              | Download the matching Windows, macOS or Linux asset from [Releases](https://github.com/xing-shuyin/pi-web-ui/releases/latest)                                                    |
-| Windows portable ZIP | Keep the app and portable data together             | Extract `pi-web-ui-desktop-<version>-portable.zip`; follow its included launcher instructions. Bundled Git/Node depend on the build; see [portable details](./desktop/README.md) |
-| Docker Compose       | Container deployment built from source              | See the commands below                                                                                                                                                           |
-| Android / Termux     | Browser access from an Android terminal environment | [Termux prerequisites and commands](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#termux-install)                                                                       |
-| Source checkout      | Contributing or testing local changes               | [Development](#development)                                                                                                                                                      |
+- **Global & Project Memories:** Automatically injects `<user_memory>` into the system prompt with both **Global Memories** (personal preferences, coding style, background) and **Project Memories** (repo-specific conventions + custom instructions).
+- **Zero-RTT Inline Memory Markers:** Works across all presets—including **Chat-only (`ask`) mode**—via inline markers (`[[memory:global:...]]`, `[[memory:project:...]]`, `[[memory:forget:...]]`), allowing the AI to remember facts on the fly without extra tool-call round trips.
+- **Per-Chat Isolated Memory (`🔒 独立记忆`):** One-click toggle to isolate any conversation so it neither reads from nor writes to shared memories.
+- **Cross-Device GitHub Cloud Sync:** Sign in via **GitHub OAuth Device Flow** (8-character browser code, zero CLI dependencies) or Personal Access Token. Memories and topic projects automatically sync to a private `pi-memory-sync` repository in your GitHub account using deterministic per-item timestamp + tombstone merging across **Windows, macOS, and Ubuntu**.
 
-On Linux, native dependency compilation may require Python, make and a C++ compiler. On Windows, install Git for Windows when Bash-based workflows are needed. Portable data placement does not guarantee that the operating system, browser or external tools leave no traces.
+### 4. True Single-Instance Desktop Lifecycle (Windows / macOS / Ubuntu)
 
-### Run as a background service
+- **Close Window = Clean Exit:** Unified across Windows, macOS, and Linux—closing the window exits the application instead of leaving background daemons behind, with an in-app confirmation dialog if an agent task is still running.
+- **Three-Stage Process Tree Cleanup:**
+  1. Snapshots all descendant PIDs of the server sidecar;
+  2. Requests graceful IPC shutdown (`5s` budget to dispose PTYs, MCP bridges, and LSP servers);
+  3. Enforces tree-kill (`taskkill /F /T` on Windows, process-tree `SIGKILL` on POSIX) plus survivor sweep—verified in CI even when background processes detach from their terminal.
 
-After global npm installation, install **and start** the service with explicit project and data paths. Stop any foreground process already using the port first.
+---
 
-```bash
-pi-web-ui server install --cwd "/path/to/project" --data-dir "/path/to/pi-data" --port 8787
-pi-web-ui server status
-```
+## 🚀 Installation & Usage
 
-Windows PowerShell example:
+### Option 1: Prebuilt Desktop App (Windows / macOS / Ubuntu)
 
-```powershell
-pi-web-ui server install --cwd "D:\Projects\app" --data-dir "D:\pi-data" --port 8787
-pi-web-ui server status
-```
+Download the installer for your platform from [**GitHub Releases**](https://github.com/feifeifei527/pi-web-ui/releases/latest):
 
-Visit `http://127.0.0.1:8787` and verify the project and a model response. macOS uses a user launchd agent, Linux systemd, and Windows the current user's login Run key. Linux installation may require elevated privileges; Windows login autostart is not a system-level Windows Service.
+| Platform           | Package                                      | Notes                                                                                                                                                           |
+| ------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows**        | `PI-<version>-setup.exe` or `*-portable.zip` | Built-in runtime; portable edition includes launcher scripts                                                                                                    |
+| **macOS**          | `PI-<version>.dmg`                           | Ad-hoc signed (`identity: "-"`). On first open, if Gatekeeper warns that the app is damaged, run:<br>`sudo xattr -rd com.apple.quarantine /Applications/PI.app` |
+| **Ubuntu / Linux** | `PI-<version>.AppImage`                      | `chmod +x PI-*.AppImage && ./PI-*.AppImage`                                                                                                                     |
 
-```bash
-pi-web-ui server stop
-pi-web-ui server start
-pi-web-ui server restart
-pi-web-ui server status
-pi-web-ui server shortcut
-# Remove the service only when it is no longer needed:
-pi-web-ui server uninstall
-```
+### Option 2: Run from Source (Desktop or Web Mode)
 
-Use `--name my-pi` consistently when installing and managing named services. Services may not inherit interactive-shell credentials or PATH. See [service configuration](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#daemon-service).
-
-### Common startup options
+Requires **Node.js >= 22.19.0**.
 
 ```bash
-pi-web-ui --cwd "/path/to/project" --port 9000 --no-browser
-pi-web-ui --host 0.0.0.0 --port 9000 --cwd "/path/to/project"
-pi-web-ui --help
-```
-
-| Flag                 | Environment           | Purpose / default                                                                  |
-| -------------------- | --------------------- | ---------------------------------------------------------------------------------- |
-| `--cwd <dir>`        | `PI_WEB_CWD`          | Workspace: current directory in foreground; `~/pi-web-ui` for service installation |
-| `--port <n>`         | `PI_WEB_PORT`         | HTTP and WebSocket port; 8787                                                      |
-| `--host <addr>`      | `PI_WEB_HOST`         | Listen address; 127.0.0.1 is local-only                                            |
-| `--data-dir <dir>`   | `PI_WEB_DATA_DIR`     | Service data; `~/.pi-web` under the running account                                |
-| `--agent-dir <dir>`  | `PI_CODING_AGENT_DIR` | pi agent configuration; `~/.pi/agent`                                              |
-| `--engine <pi\|dsh>` | `PI_WEB_ENGINE`       | Execution engine; pi                                                               |
-| `--no-browser`       | —                     | Do not automatically open a browser                                                |
-
-Paths with spaces need quoting. `0.0.0.0` is a listen address; other devices connect using the server's actual IP or domain. Configure authentication and appropriate network protection before sharing access. [Full startup reference](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#cli-and-env).
-
-### Local `/setup` page
-
-Open **`http://127.0.0.1:8787/setup` on the server's machine**, substituting the actual port. This page configures server access and networking; API keys and models belong in workspace settings.
-
-- Set or generate an access token, then **save**. Token changes apply immediately; an empty saved token disables token authentication.
-- Configure listen address, port, Host allowlist and extra Origins; these require a restart.
-- Check the displayed `<dataDir>/server-config.json` path. Startup flags and environment take precedence over saved settings on restart.
-- LAN and proxy access to `/setup` is restricted. A remote server can be reached through an SSH local port forward; see the [step-by-step setup guide](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#setup-page).
-
-### Docker from source
-
-```bash
-git clone https://github.com/xing-shuyin/pi-web-ui.git
-cd pi-web-ui
-# Review docker-compose.yml: authentication, ports, project and credential mounts.
-docker compose up -d --build
-docker compose logs -f
-```
-
-The repository Compose configuration builds the image locally. Persist service data at **`/app/.pi-web`** in the container. Mount projects and credentials deliberately; container paths differ from host paths. Do not assume a published container port satisfies `/setup`'s loopback checks. See [container installation](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#docker-source-install) and [deployment](./docs/deployment.md).
-
-### Update and remove
-
-```bash
-npm install -g pi-web-ui@latest
-pi-web-ui server restart  # For an installed service; restart foreground processes yourself.
-```
-
-Desktop and portable users should follow the matching package's update instructions and retain their actual data directories. Before removal, back up needed conversations, settings and credentials. For npm users, uninstall the service first if installed, then run `npm uninstall -g pi-web-ui`. Removing the package does not remove separately stored user data.
-
-## What you can do
-
-- **Chat and context:** streaming responses, tool outputs, attachments, file references, structured questions and multiple conversations.
-- **Work on projects:** file browsing and previews, uploads, integrated terminals, Git diffs, staging and commits. Remote SSH capabilities depend on the engine, host tools and connection configuration.
-- **Organize agent work:** planning, goal review/execution, delegated work and subagents. File claims coordinate parallel edits through advisory notices; they are not edit locks.
-- **Extend the workspace:** plugins, MCP tools, skills, configuration presets and customizable layouts and themes. Availability depends on installed components and permissions.
-
-Approval controls, task modes and isolated project directories have specific implementation boundaries; they are not universal operating-system security sandboxes. See [approval and security](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#approval-and-security).
-
-## See the workspace
-
-| Chat                                          | Terminal                                       |
-| --------------------------------------------- | ---------------------------------------------- |
-| ![Chat workspace](./assets/chat-prompts.jpeg) | ![Integrated terminal](./assets/terminal.jpeg) |
-
-| Git                               | Settings                                                |
-| --------------------------------- | ------------------------------------------------------- |
-| ![Git changes](./assets/git.jpeg) | ![Model and workspace settings](./assets/settings.jpeg) |
-
-## Plugins and documentation
-
-Browse plugins in the workspace or install from a repository:
-
-```bash
-pi-web-ui install owner/repo
-pi-web-ui plugins
-pi-web-ui plugin create my-plugin
-```
-
-Plugin permissions and external-service requirements vary. For submissions, follow the [community registry](https://github.com/xing-shuyin/pi-web-ui-plugins); automation is governed by that repository's current checks and policies.
-
-- [Getting started and installation](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#installation)
-- [Remote SSH projects](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#remote-ssh-projects)
-- [Plan, goal and review workflows](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#modes-guide)
-- [MCP and browser tools](https://xing-shuyin.github.io/pi-web-ui-site/docs.html#mcp-and-browser)
-- [Plugin SDK](./plugin-sdk/README.md) · [Desktop](./desktop/README.md) · [Windows portable launcher](./launcher/README.md)
-- [Environment variables](./docs/env-vars.md) · [Deployment](./docs/deployment.md) · [Architecture](./docs/architecture-core.md)
-
-## Development
-
-```bash
-git clone https://github.com/xing-shuyin/pi-web-ui.git
+git clone https://github.com/feifeifei527/pi-web-ui.git
 cd pi-web-ui
 npm ci
-npm run dev
+
+# Build web + server + desktop shell
+npm run build
+npm run build:desktop
+
+# Launch the Electron desktop app
+npm run desktop:dev
+
+# Or run in headless / browser mode (http://127.0.0.1:8787)
+npm start
 ```
 
-Node.js 22.19.0+ and the platform's native build dependencies are required. The dev frontend is normally on port 5173 and the backend on 8788. For a production checkout, run `npm run build`, then `npm start`.
+### Common CLI Flags (Web / Server Mode)
 
-Before submitting a change, follow [development guidelines](./docs/development.md) and run the applicable formatting, type, lint and test checks. Desktop build details live in [desktop/README.md](./desktop/README.md).
+| Flag               | Environment Variable | Description                                                              |
+| ------------------ | -------------------- | ------------------------------------------------------------------------ |
+| `--cwd <dir>`      | `PI_WEB_CWD`         | Initial workspace directory                                              |
+| `--port <n>`       | `PI_WEB_PORT`        | HTTP/WebSocket port (`8787` for web, `8790` default for desktop sidecar) |
+| `--host <addr>`    | `PI_WEB_HOST`        | Listen address (`127.0.0.1` by default)                                  |
+| `--data-dir <dir>` | `PI_WEB_DATA_DIR`    | Data directory (`~/.pi-web` by default)                                  |
+| `--no-browser`     | —                    | Start server without opening a browser window                            |
 
-## Community and license
+---
 
-[Issues](https://github.com/xing-shuyin/pi-web-ui/issues) · [Discussions](https://github.com/xing-shuyin/pi-web-ui/discussions) · QQ group: `1126050727` · [dsh-ui-tools](https://github.com/xing-shuyin/dsh-ui-tools)
+## ⌨️ Keyboard Shortcuts
 
-[MIT License](./LICENSE)
+| Shortcut         | Action                               |
+| ---------------- | ------------------------------------ |
+| `Ctrl / Cmd + K` | Open Command Palette & Global Search |
+| `Ctrl + \``      | Toggle bottom Terminal Dock          |
+| `Ctrl / Cmd + ,` | Open Settings                        |
+| `Alt + Z`        | Toggle Zen / Focus Mode              |
+
+---
+
+## 🧪 Verification & Quality Gates
+
+```bash
+# Typecheck all 5 TypeScript projects (server, web, desktop, tests, extension)
+npm run typecheck
+
+# Unit tests (Vitest)
+npm test
+
+# Cross-platform desktop exit & zero-orphan process tree test
+npm run test:desktop-exit
+
+# Minimal shell end-to-end browser test
+node tests/minimal-shell-browser-test.mjs
+```
+
+---
+
+## 🙏 Credits & License
+
+- **Upstream Foundation:** Forked from and inspired by [`xing-shuyin/pi-web-ui`](https://github.com/xing-shuyin/pi-web-ui) and the `@earendil-works/pi-coding-agent` SDK.
+- **Redesign & Memory/Sync Architecture:** Crafted by [@feifeifei527](https://github.com/feifeifei527).
+- **License:** [MIT](./LICENSE)
