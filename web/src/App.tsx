@@ -528,7 +528,7 @@ export function App() {
 	const viewTab = viewChosen.startsWith("plugin:") ? "plugins" : viewChosen;
 	const view: ViewName = tabOn(viewTab) ? viewChosen : "chat";
 	// —— 极简外壳（redesign P2，docs/redesign-plan.md）—— classic = 旧 TopBar/SideDock/FooterBar 布局
-	const { shell, setShell, scheme, setScheme } = useShellPrefs();
+	const { shell, scheme, setScheme } = useShellPrefs();
 	const minimal = shell === "minimal";
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [searchSeed, setSearchSeed] = useState<{ text: string; nonce: number } | null>(null);
@@ -2423,6 +2423,16 @@ export function App() {
 				run: () => setProjectPickerOpen(true),
 			},
 			{ id: "bg-tasks", group: G.chat, label: t("bgTasks"), keywords: ["tasks"], run: () => setBgTasksOpen(true) },
+			{
+				id: "set-goal",
+				group: G.chat,
+				label: t("goalBarTitle"),
+				keywords: ["goal", "target", t("goalBarPlaceholder")],
+				run: () => {
+					handleViewChange("chat");
+					requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".goalbar-hint")?.click());
+				},
+			},
 
 			{
 				id: "toggle-sidebar",
@@ -2532,13 +2542,6 @@ export function App() {
 				checked: scheme === s,
 				run: () => setScheme(s),
 			})),
-			{
-				id: "shell-classic",
-				group: G.look,
-				label: t("shellUseClassic"),
-				keywords: ["classic", "layout", "topbar"],
-				run: () => setShell("classic"),
-			},
 
 			...localePacks.map((p) => ({
 				id: `locale-${p.code}`,
@@ -2761,7 +2764,6 @@ export function App() {
 					theme={theme}
 					onThemeChange={switchTheme}
 					reloadThemes={reloadThemes}
-					onSwitchToMinimal={() => setShell("minimal")}
 				/>
 			)}
 			{iconEditOpen && (

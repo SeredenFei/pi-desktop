@@ -197,8 +197,6 @@ interface TopBarProps {
 	onToggleZenMode?: () => void;
 	/** 打开启动沙盒项目弹窗 */
 	onOpenSandboxModal?: () => void;
-	/** 切回极简外壳（redesign P2）。 */
-	onSwitchToMinimal?: () => void;
 }
 
 export function TopBar({
@@ -224,7 +222,6 @@ export function TopBar({
 	zenMode,
 	onToggleZenMode,
 	onOpenSandboxModal,
-	onSwitchToMinimal,
 }: TopBarProps) {
 	const { locale, setLocale, t, packs } = useI18n();
 	// 「⋯」溢出菜单的开关（宿主自己的菜单，插件不碰 DOM；顺序与设置面板里看到的一致）。
@@ -1400,21 +1397,6 @@ export function TopBar({
 							<FiEdit2 />
 							<span className="tb-row-text">{t("uiIconEdit")}</span>
 						</button>
-						{onSwitchToMinimal && (
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-row"
-								data-testid="switch-to-minimal"
-								onClick={() => {
-									setTopbarMenuOpen(false);
-									onSwitchToMinimal();
-								}}
-							>
-								<FiLayers />
-								<span className="tb-row-text">{t("shellUseMinimal")}</span>
-							</button>
-						)}
 					</TopbarOverflowMenu>
 				</div>
 			)}

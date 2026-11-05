@@ -186,20 +186,14 @@ async function main() {
 	check("状态行含引擎", statusItems.includes("host:engine"), statusItems);
 	check("状态行含上下文", statusItems.includes("host:ctx"), statusItems);
 
-	console.log("8. 切到经典布局再切回");
+	console.log("8. P3：无内容时隐藏 GoalBar 药丸，命令面板可展开目标栏，且不再暴露旧主题/经典布局入口");
+	check("无目标时 .goalbar-collapsed 隐藏", !(await page.isVisible(".goalbar-collapsed")));
 	await page.keyboard.press("Control+K");
 	await page.waitForSelector('[data-testid="command-palette-input"]', { timeout: 3000 });
-	await page.fill('[data-testid="command-palette-input"]', "经典布局");
-	await page.keyboard.press("Enter");
-	await page.waitForSelector(".topbar", { timeout: 10000 });
-	check("经典布局：TopBar 回来", await page.isVisible(".topbar"));
-	check("经典布局：旧主题恢复", (await page.getAttribute("html", "data-theme")) === "nord");
-	check("经典布局：极简标题栏消失", (await page.locator('[data-testid="minimal-titlebar"]').count()) === 0);
-	await page.locator(".plugin-topbar-more > button").first().click();
-	await page.waitForSelector('[data-testid="switch-to-minimal"]', { timeout: 5000 });
-	await page.click('[data-testid="switch-to-minimal"]');
-	await page.waitForSelector('[data-testid="minimal-titlebar"]', { timeout: 10000 });
-	check("顶栏 ⋯ → 「切换到极简布局」切回极简", true);
+	check("命令面板不再暴露 shell-classic", (await page.locator('.cmdk-item[data-cmd="shell-classic"]').count()) === 0);
+	await page.locator('.cmdk-item[data-cmd="set-goal"]').click();
+	await page.waitForSelector(".goalbar", { state: "visible", timeout: 5000 });
+	check("命令面板「目标」展开 .goalbar", await page.isVisible(".goalbar"));
 
 	console.log("9. 手机宽度");
 	await page.setViewportSize({ width: 390, height: 800 });

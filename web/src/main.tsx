@@ -8,6 +8,7 @@ import "./styles.css";
 import "highlight.js/styles/github-dark.css";
 import "./minimal/tokens.css";
 import "./minimal/shell.css";
+import "./minimal/components.css";
 import { applyTheme, loadTheme } from "./theme";
 import { applyShellAttrs, readScheme, readShellMode } from "./shell-mode";
 import { applyFavicon } from "./favicon-settings";

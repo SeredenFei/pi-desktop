@@ -1,0 +1,420 @@
+/*
+ * 极简外壳组件样式（redesign P3，docs/redesign-plan.md §10, §12, §16, §17）。
+ *
+ * 原则：
+ *   - 全部挂在 `.app.shell-minimal` 或 `html[data-shell="minimal"]`（portal 到 body 的弹窗/浮层）下；
+ *   - 全部位于 `@layer minimal`（声明顺序排在 guard / base / theme 之后，无需 !important）；
+ *   - 主体排版走 Claude Desktop 风格（大留白、助手正文无框直印画布、用户消息圆角胶囊）；
+ *   - 工具调用、思考块、代码块、Diff、终端走 Codex 桌面版紧凑等宽风格；
+ *   - 颜色只引用 tokens.css 的语义变量，浅色（#FAF9F5）与深色（#262624）自动同构。
+ */
+@layer minimal {
+	/* ───────────────────────── 1. 对话流与消息（Claude 风） ───────────────────────── */
+	.shell-minimal .messages {
+		padding-top: 12px;
+	}
+	.shell-minimal .msg {
+		padding: 6px 0 12px;
+		background: transparent;
+		border: 0;
+		box-shadow: none;
+	}
+	/* 普通单聊隐藏「USER / ASSISTANT · 模型名」元数据抬头，群聊 / 协作消息仍保留发送者身份 */
+	.shell-minimal .msg:not(.msg-group):not(.msg-collaboration):not(.msg-collab-notice) > .msg-meta {
+		display: none;
+	}
+	/* 用户消息：靠右的圆角胶囊，暖色微底、无硬边框 */
+	.shell-minimal .msg-user:not(.msg-group):not(.msg-collaboration):not(.msg-collab-notice) {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		padding-bottom: 4px;
+	}
+	.shell-minimal .msg-user:not(.msg-group):not(.msg-collaboration):not(.msg-collab-notice) > .msg-body {
+		max-width: min(78%, 640px);
+		padding: 9px 14px;
+		border: 0;
+		border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+		background: var(--bg-elev2);
+		color: var(--text);
+		box-shadow: none;
+		line-height: 1.58;
+	}
+	/* 助手消息：无气泡外框，直接排在画布上 */
+	.shell-minimal .msg-assistant > .msg-body {
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+		color: var(--text);
+		font-size: 14.5px;
+		line-height: 1.68;
+		letter-spacing: 0.005em;
+	}
+	.shell-minimal .msg-body p {
+		margin: 0.48em 0;
+		line-height: 1.68;
+	}
+	.shell-minimal .msg-body p:first-child {
+		margin-top: 0;
+	}
+	.shell-minimal .msg-body p:last-child {
+		margin-bottom: 0;
+	}
+	.shell-minimal .msg-body :is(h1, h2, h3, h4) {
+		margin: 0.8em 0 0.32em;
+		font-weight: 600;
+		line-height: 1.35;
+		color: var(--md-strong);
+	}
+	.shell-minimal .msg-body :is(h1, h2, h3, h4):first-child {
+		margin-top: 0;
+	}
+	.shell-minimal .msg-body :is(ul, ol) {
+		margin: 0.36em 0;
+		padding-left: 1.35em;
+	}
+	.shell-minimal .msg-body li {
+		margin: 0.16em 0;
+		line-height: 1.62;
+	}
+	.shell-minimal .msg-body blockquote {
+		margin: 0.45em 0;
+		padding: 2px 0 2px 12px;
+		border: 0;
+		border-left: 2px solid var(--border);
+		background: transparent;
+		color: var(--text-dim);
+	}
+	.shell-minimal .msg-body code:not(pre code) {
+		padding: 1.5px 5px;
+		border: 0;
+		border-radius: 5px;
+		background: var(--bg-elev2);
+		color: var(--text);
+		font-family: var(--mono);
+		font-size: 0.88em;
+	}
+	.shell-minimal .msg-actions {
+		margin-top: 2px;
+		opacity: 0;
+		transition: opacity var(--dur) var(--ease);
+	}
+	.shell-minimal .msg:hover .msg-actions,
+	.shell-minimal .msg:focus-within .msg-actions {
+		opacity: 0.85;
+	}
+	/* 空对话：收敛留白与卡片边框 */
+	.shell-minimal .empty-state {
+		padding: 56px 20px 24px;
+	}
+
+	/* ───────────────────────── 2. 工具调用块与思考块（Codex 紧凑风） ───────────────────────── */
+	.shell-minimal :is(.toolcall, .thinking) {
+		margin: 5px 0;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		box-shadow: none;
+	}
+	.shell-minimal .thinking {
+		background: transparent;
+		border-color: transparent;
+	}
+	.shell-minimal .thinking:hover,
+	.shell-minimal .thinking:has(.thinking-body) {
+		background: var(--bg-elev);
+		border-color: var(--border-soft);
+	}
+	.shell-minimal .toolcall.err {
+		border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+	}
+	.shell-minimal .chead {
+		min-height: 28px;
+		padding: 2px 8px 2px 4px;
+		border-radius: var(--radius-sm);
+		font-family: var(--mono);
+		font-size: 12px;
+	}
+	.shell-minimal .chead-toggle {
+		width: 22px;
+		height: 22px;
+	}
+	.shell-minimal .chead-icon.thinking-icon,
+	.shell-minimal .chead-icon.toolcall-icon {
+		width: 18px;
+		height: 18px;
+		border-radius: 4px;
+		background: transparent;
+	}
+	.shell-minimal .thinking-body {
+		padding: 6px 12px 10px 30px;
+		border-top: 1px solid var(--border-soft);
+		font-style: normal;
+		font-size: 12.5px;
+		line-height: 1.58;
+		color: var(--text-dim);
+	}
+	.shell-minimal .toolcall-body {
+		padding: 6px 10px 10px;
+		border-top: 1px solid var(--border-soft);
+		background: var(--code-bg);
+		font-family: var(--mono);
+		font-size: 12px;
+	}
+	.shell-minimal :is(.toolcall-args, .toolcall-output) pre {
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		padding: 4px 2px;
+		font-family: var(--mono);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	/* ───────────────────────── 3. 代码块、终端执行块与 Diff（Codex 风） ───────────────────────── */
+	.shell-minimal .codeblock {
+		margin: 8px 0;
+	}
+	.shell-minimal .codeblock pre {
+		background: var(--code-bg);
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-md);
+		padding: 10px 0;
+	}
+	.shell-minimal .code-line {
+		padding: 0 14px;
+	}
+	.shell-minimal .code-line .code-num,
+	.shell-minimal .codeblock code.code-line-body {
+		font-family: var(--mono);
+		font-size: 12.5px;
+		line-height: 1.55;
+	}
+	.shell-minimal .bashblock {
+		margin: 6px 0;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--code-bg);
+		font-family: var(--mono);
+		font-size: 12px;
+	}
+	.shell-minimal .diff-gutter-num,
+	.shell-minimal .diff-line-num {
+		background: var(--code-bg);
+		border-right-color: var(--border-soft);
+		font-family: var(--mono);
+	}
+	.shell-minimal .diff-line-content,
+	.shell-minimal .diff-line-text {
+		font-family: var(--mono);
+		font-size: 12px;
+	}
+
+	/* ───────────────────────── 4. 输入框、快捷短语与底部浮标 ───────────────────────── */
+	.shell-minimal .inputbar {
+		padding-bottom: 6px;
+	}
+	.shell-minimal .inputbox {
+		background: var(--inputbox-bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		padding: 10px 12px 8px;
+		box-shadow: 0 2px 10px var(--glow-05);
+		transition:
+			border-color var(--dur) var(--ease),
+			box-shadow var(--dur) var(--ease);
+	}
+	.shell-minimal .inputbox:focus-within {
+		border-color: color-mix(in srgb, var(--text) 24%, var(--border));
+		box-shadow: 0 4px 18px var(--glow-12);
+	}
+	.shell-minimal .composer-tools {
+		border-top: 0;
+		padding-top: 4px;
+	}
+	.shell-minimal .composer-tools .chip {
+		height: 26px;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text-dim);
+		box-shadow: none;
+	}
+	.shell-minimal .composer-tools .chip:hover {
+		background: var(--bg-elev2);
+		color: var(--text);
+	}
+	.shell-minimal .inputbox .btn.send {
+		width: 30px;
+		height: 30px;
+		min-width: 30px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: var(--accent);
+		color: var(--accent-contrast);
+		box-shadow: none;
+	}
+	.shell-minimal .inputbox .btn.send:hover:not(:disabled) {
+		background: var(--accent-hover);
+	}
+	.shell-minimal .inputbox .btn.send:disabled {
+		opacity: 0.35;
+	}
+	.shell-minimal :is(.quick-chip, .action-suggestion-chip) {
+		border: 1px solid var(--border-soft);
+		border-radius: 999px;
+		background: var(--card-bg);
+		color: var(--text-dim);
+		box-shadow: none;
+		backdrop-filter: none;
+	}
+	.shell-minimal :is(.quick-chip, .action-suggestion-chip):hover:not(:disabled) {
+		border-color: var(--border);
+		background: var(--bg-elev2);
+		color: var(--text);
+	}
+	.shell-minimal .scroll-bottom {
+		border: 1px solid var(--border);
+		background: var(--card-bg);
+		color: var(--text-dim);
+		box-shadow: 0 4px 14px var(--glow-12);
+	}
+
+	/* ───────────────────────── 5. GoalBar & PlanBoard（有内容才显示） ───────────────────────── */
+	/* 未设目标时的「🎯 设置目标」悬空药丸在极简外壳下隐藏（可从命令面板打开）；回底浮标无需为它让位 */
+	.shell-minimal .goalbar-collapsed {
+		display: none;
+	}
+	.shell-minimal .main:has(.goalbar-collapsed):not(:has(.plan-board)):not(:has(.dialog-inline)) .scroll-bottom {
+		bottom: calc(4px + var(--composer-strip));
+	}
+	.shell-minimal .goalbar,
+	.shell-minimal .plan-board {
+		margin: 0 var(--chat-inset) 6px;
+		padding: 8px 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-md);
+		background: var(--bg-elev);
+		box-shadow: none;
+	}
+	.shell-minimal .plan-board.plan-board-collapsed {
+		padding: 4px 10px 6px;
+		border-radius: var(--radius-sm);
+	}
+
+	/* ───────────────────────── 6. 左侧栏与右侧文件抽屉 ───────────────────────── */
+	/* 去掉分区硬分割线，改用留白区分 */
+	.shell-minimal .lp-section,
+	.shell-minimal .lp-section.collapsed:not(:last-child),
+	.shell-minimal .lp-section.panel-projects {
+		border-bottom: 0;
+	}
+	.shell-minimal .lp-sash::after,
+	.shell-minimal .rp-sash::after {
+		background: transparent;
+	}
+	.shell-minimal .lp-section-header {
+		padding: 0 10px;
+	}
+	.shell-minimal .lp-section-title,
+	.shell-minimal .panel-section-title {
+		font-size: 11px;
+		font-weight: 500;
+		letter-spacing: 0.02em;
+		color: var(--text-faint);
+	}
+
+	/* ───────────────────────── 7. 底部终端面板内部（紧凑顶栏代替 250px 左栏） ───────────────────────── */
+	.shell-minimal .term-dock .terminal-view {
+		flex-direction: column;
+		background: var(--term-bg);
+	}
+	.shell-minimal .term-dock .term-side {
+		width: 100%;
+		flex-direction: row;
+		align-items: center;
+		border-right: 0;
+		border-bottom: 1px solid var(--border-soft);
+		background: var(--bg-elev);
+		padding-right: 36px; /* 让开右上角关闭按钮 */
+	}
+	/* 预设命令区在底栏模式下收起（节省纵向空间；终端标签水平平铺） */
+	.shell-minimal .term-dock .term-side > .panel-header,
+	.shell-minimal .term-dock .term-side > .panel-body {
+		display: none;
+	}
+	.shell-minimal .term-dock .term-tabs-block {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		border-top: 0;
+		min-width: 0;
+	}
+	.shell-minimal .term-dock .term-tabs-block > .panel-header {
+		height: 32px;
+		padding: 0 6px 0 10px;
+		border-bottom: 0;
+		gap: 6px;
+		flex: none;
+	}
+	.shell-minimal .term-dock .term-tabs-block > .panel-body {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 4px;
+		padding: 3px 6px;
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+	.shell-minimal .term-dock .term-tab {
+		height: 24px;
+		padding: 0 8px;
+		border-radius: 6px;
+		flex: none;
+	}
+	.shell-minimal .term-dock .term-folder {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.shell-minimal .term-dock .term-folder-body {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	/* ───────────────────────── 8. 弹窗、下拉菜单與设置面板 ───────────────────────── */
+	html[data-shell="minimal"] .modal-backdrop {
+		background: rgba(0, 0, 0, 0.32);
+		backdrop-filter: none;
+	}
+	html[data-shell="minimal"] .modal {
+		background: var(--card-bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		box-shadow:
+			0 16px 48px var(--glow-22),
+			0 2px 10px var(--glow-12);
+	}
+	html[data-shell="minimal"] .settings-modal .modal-head.settings-cmd-head {
+		background: var(--bg-elev);
+		border-bottom: 1px solid var(--border-soft);
+	}
+	html[data-shell="minimal"] :is(.dd-menu, .ctx-menu, .pm-panel, .floating-panel, [data-pi-floating-panel]) {
+		background: var(--menu-bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		box-shadow: 0 10px 30px var(--glow-18);
+	}
+}
+
+/*
+ * 左侧会话树连接线：styles.css 末尾「无层覆盖区」硬编码了白色半透明 `rgba(255,255,255,0.15)`，
+ * 浅色模式下完全看不见；这里同样用无层规则覆盖为语义边框色。
+ */
+html[data-shell="minimal"] .lp-project-tree-children .lp-row.lp-sub::before {
+	border-color: var(--border);
+}
