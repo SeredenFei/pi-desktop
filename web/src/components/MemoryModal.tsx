@@ -214,31 +214,23 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 
 /**
  * 极简侧栏顶部固定区（Codex 风格 Chat / Work 双模式分栏）：
- * 1. 顶层「💬 Chat | 🛠 Work」分段切换 + 右侧「🧠 记忆」按钮；
+ * 1. 顶层「💬 Chat | 🛠 Work」分段切换（记忆入口在侧栏左下角账户卡片，见 SidebarFooter）；
  * 2. 在 Chat 模式下：提供「💬 独立对话」行与「+ 新建 Chat 项目」行内快速创建。
  */
 export function ChatSpaceHeader({
 	mode,
 	onModeChange,
 	isChatSpace,
-	memoryCount,
-	isolated,
-	synced,
 	onEnterChatSpace,
 	onNewStandaloneChat,
 	onCreateChatProject,
-	onOpenMemoryModal,
 }: {
 	mode: "chat" | "work";
 	onModeChange: (mode: "chat" | "work") => void;
 	isChatSpace: boolean;
-	memoryCount: number;
-	isolated: boolean;
-	synced: boolean;
 	onEnterChatSpace: () => void;
 	onNewStandaloneChat: () => void;
 	onCreateChatProject: (name: string) => void;
-	onOpenMemoryModal: () => void;
 }) {
 	const { locale } = useI18n();
 	const zh = isZhLocale(locale);
@@ -289,27 +281,6 @@ export function ChatSpaceHeader({
 						<span>Work</span>
 					</button>
 				</div>
-				<button
-					type="button"
-					className={`cs-memory-pill${isolated ? " isolated" : ""}`}
-					onClick={onOpenMemoryModal}
-					title={
-						isolated
-							? zh
-								? "当前对话：独立记忆（不读写共享记忆）· 点击管理记忆与跨端同步"
-								: "Isolated memory · Click to manage memory & sync"
-							: zh
-								? "管理共享记忆、项目指令与跨端同步"
-								: "Manage shared memory & cloud sync"
-					}
-					data-testid="open-memory-modal"
-				>
-					{isolated ? <FiLock className="cs-icon" /> : <FiUnlock className="cs-icon" />}
-					<span className="cs-badge">{isolated ? "OFF" : memoryCount}</span>
-					{synced && (
-						<span className="cs-sync-dot" title={zh ? "已连接 GitHub 跨端同步" : "GitHub cloud sync active"} />
-					)}
-				</button>
 			</div>
 
 			{mode === "chat" && (
@@ -376,6 +347,7 @@ export function MemoryModal({
 	onClose,
 	onSwitchCwd,
 	onOpenTranscript,
+	initialTab = "global",
 }: {
 	open: boolean;
 	cwd: string;
@@ -385,10 +357,12 @@ export function MemoryModal({
 	onClose: () => void;
 	onSwitchCwd: (targetCwd: string) => void;
 	onOpenTranscript?: (cwd: string, filePath: string, sessionId: string) => void;
+	/** 打开时默认停留的标签（未登录时从左下角账户卡片进入直接落在「跨端登录同步」）。 */
+	initialTab?: "global" | "project" | "sync";
 }) {
 	const { locale } = useI18n();
 	const zh = isZhLocale(locale);
-	const [tab, setTab] = useState<"global" | "project" | "sync">("global");
+	const [tab, setTab] = useState<"global" | "project" | "sync">(initialTab);
 	const [newGlobalText, setNewGlobalText] = useState("");
 	const [newProjectText, setNewProjectText] = useState("");
 	const [instructionsDraft, setInstructionsDraft] = useState("");
@@ -1047,9 +1021,7 @@ export function MemoryModal({
 												<div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>
 													<span>{tr.scopeName}</span>
 													<span> · {zh ? `${tr.messageCount} 条消息` : `${tr.messageCount} msgs`}</span>
-													{tr.updatedAt > 0 && (
-														<span> · {new Date(tr.updatedAt).toLocaleString()}</span>
-													)}
+													{tr.updatedAt > 0 && <span> · {new Date(tr.updatedAt).toLocaleString()}</span>}
 												</div>
 											</div>
 											{onOpenTranscript && (

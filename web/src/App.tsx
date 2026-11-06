@@ -67,7 +67,7 @@ import { ComposerStatusLine } from "./components/ComposerStatusLine";
 import { useUpdatePanel } from "./components/update-panel";
 import { LocaleModal } from "./components/LocaleModal";
 import { Modal } from "./components/Modal";
-import { SidebarFooter, type SidebarFooterItem } from "./components/SidebarFooter";
+import { SidebarFooter, type SidebarAccount, type SidebarFooterItem } from "./components/SidebarFooter";
 import { ChatSpaceHeader, MemoryModal, useMemoryState } from "./components/MemoryModal";
 import { useShellPrefs } from "./shell-mode";
 import type { PaletteCommand } from "./command-palette";
@@ -538,6 +538,7 @@ export function App() {
 	const [localeModalOpen, setLocaleModalOpen] = useState(false);
 	const [updateModalOpen, setUpdateModalOpen] = useState(false);
 	const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+	const [memoryModalTab, setMemoryModalTab] = useState<"global" | "project" | "sync">("global");
 	const [sidebarMode, setSidebarModeState] = useState<"chat" | "work">(() => {
 		try {
 			return localStorage.getItem("pi-web-ui:sidebar-mode") === "chat" ? "chat" : "work";
@@ -2464,7 +2465,10 @@ export function App() {
 				group: G.chat,
 				label: isZhLocale(locale) ? "记忆与跨端云同步" : "Memory & Cloud Sync",
 				keywords: ["memory", "sync", "github", "remember"],
-				run: () => setMemoryModalOpen(true),
+				run: () => {
+					setMemoryModalTab("global");
+					setMemoryModalOpen(true);
+				},
 			},
 			{
 				id: "toggle-memory-isolated",
@@ -2871,17 +2875,11 @@ export function App() {
 	// Cmd/Ctrl+,  打开设置（极简外壳没有常驻设置按钮）
 	const sidebarHeader = useMemo(() => {
 		if (!minimal) return undefined;
-		const memCount =
-			(memory.view?.globalItems.filter((i) => i.enabled).length ?? 0) +
-			(memory.view?.projectItems.filter((i) => i.enabled).length ?? 0);
 		return (
 			<ChatSpaceHeader
 				mode={sidebarMode}
 				onModeChange={handleModeChange}
 				isChatSpace={Boolean(memory.view?.isChatSpace)}
-				memoryCount={memCount}
-				isolated={memory.isolated}
-				synced={Boolean(memory.sync?.loggedIn)}
 				onEnterChatSpace={() => {
 					setSidebarMode("chat");
 					enterChatSpace();
@@ -2896,18 +2894,13 @@ export function App() {
 						if (createdPath) send({ type: "set_cwd", path: createdPath });
 					});
 				}}
-				onOpenMemoryModal={() => setMemoryModalOpen(true)}
 			/>
 		);
 	}, [
 		minimal,
 		sidebarMode,
 		handleModeChange,
-		memory.view?.globalItems,
-		memory.view?.projectItems,
 		memory.view?.isChatSpace,
-		memory.isolated,
-		memory.sync?.loggedIn,
 		setSidebarMode,
 		enterChatSpace,
 		newStandaloneChat,
@@ -2922,8 +2915,31 @@ export function App() {
 			.map((c) => ({ id: c.id.slice("view-".length), label: c.label, active: c.checked, onSelect: c.run }));
 		const bg = paletteCommands.find((c) => c.id === "bg-tasks");
 		if (bg) items.push({ id: "bg-tasks", label: bg.label, onSelect: bg.run });
-		return <SidebarFooter items={items} onOpenSettings={() => openSettings()} />;
-	}, [minimal, openSettings, paletteCommands]);
+		const sync = memory.sync;
+		const account: SidebarAccount = {
+			loggedIn: Boolean(sync?.loggedIn),
+			username: sync?.username,
+			avatarUrl: sync?.avatarUrl,
+			memoryCount:
+				(memory.view?.globalItems.filter((i) => i.enabled).length ?? 0) +
+				(memory.view?.projectItems.filter((i) => i.enabled).length ?? 0),
+			isolated: memory.isolated,
+			syncing: Boolean(sync?.syncing),
+			onOpen: () => {
+				setMemoryModalTab(sync?.loggedIn ? "global" : "sync");
+				setMemoryModalOpen(true);
+			},
+		};
+		return <SidebarFooter items={items} onOpenSettings={() => openSettings()} account={account} />;
+	}, [
+		minimal,
+		openSettings,
+		paletteCommands,
+		memory.sync,
+		memory.view?.globalItems,
+		memory.view?.projectItems,
+		memory.isolated,
+	]);
 	useEffect(() => {
 		if (!minimal) return;
 		const onKey = (e: KeyboardEvent) => {
@@ -3922,6 +3938,7 @@ export function App() {
 					sessionId={activeSessionKey}
 					memory={memory}
 					setMemory={setMemory}
+					initialTab={memoryModalTab}
 					onClose={() => setMemoryModalOpen(false)}
 					onSwitchCwd={(targetCwd) => {
 						setMemoryModalOpen(false);

@@ -225,9 +225,27 @@ async function main() {
 
 	console.log("8.5. 独立对话空间 + 分级记忆与跨端同步弹窗 + 应用名 PI");
 	check("窗口标题使用简洁名称 PI", (await page.title()).includes("PI"));
-	check("侧栏顶部常驻「独立对话 + 共享记忆」入口", await page.isVisible('[data-testid="chat-space-header"]'));
+	check("侧栏顶部常驻「独立对话」入口", await page.isVisible('[data-testid="chat-space-header"]'));
+	const account = await page.evaluate(() => {
+		const btn = document.querySelector('[data-testid="open-memory-modal"]');
+		return {
+			inFooter: !!btn?.closest('[data-testid="sidebar-footer"]'),
+			name: document.querySelector('[data-testid="sidebar-account-name"]')?.textContent,
+			hasAvatar: !!btn?.querySelector(".sb-avatar"),
+		};
+	});
+	check(
+		"记忆入口在左下角账户卡片（未登录显示「登录 GitHub 同步」+ 头像占位）",
+		account.inFooter && account.hasAvatar && account.name === "登录 GitHub 同步",
+		account,
+	);
 	await page.click('[data-testid="open-memory-modal"]');
 	await page.waitForSelector('[data-testid="memory-modal"]', { timeout: 5000 });
+	check(
+		"未登录时从账户卡片进入直接落在「跨端登录同步」标签",
+		(await page.locator('[data-testid="mem-tab-sync"].active').count()) === 1,
+	);
+	await page.locator(".mem-tab").nth(0).click();
 	check("点击打开记忆与跨端同步弹窗", true);
 	await page.fill('[data-testid="mem-global-input"]', "偏好使用极简 TypeScript 代码风格");
 	await page.click('[data-testid="mem-global-add"]');

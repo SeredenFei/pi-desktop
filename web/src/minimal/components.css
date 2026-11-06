@@ -452,27 +452,6 @@
 		color: var(--text);
 		box-shadow: 0 1px 3px var(--glow-12);
 	}
-	.shell-minimal .cs-memory-pill {
-		height: 30px;
-		padding: 0 8px;
-		border: 1px solid var(--border-soft);
-		border-radius: var(--radius-sm);
-		background: var(--bg-elev);
-		color: var(--text-dim);
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		font-size: 12px;
-		cursor: pointer;
-	}
-	.shell-minimal .cs-memory-pill:hover {
-		background: var(--bg-elev2);
-		color: var(--text);
-	}
-	.shell-minimal .cs-memory-pill.isolated {
-		color: var(--amber);
-		border-color: var(--amber);
-	}
 	.shell-minimal .cs-chat-sub {
 		display: flex;
 		flex-direction: column;
@@ -558,21 +537,6 @@
 	}
 	.shell-minimal .cs-memory-btn.isolated {
 		color: var(--amber);
-	}
-	.shell-minimal .cs-badge {
-		margin-left: auto;
-		padding: 1px 6px;
-		border-radius: 999px;
-		background: var(--bg-elev2);
-		color: var(--text-dim);
-		font-size: 11px;
-		font-family: var(--mono);
-	}
-	.shell-minimal .cs-sync-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--green);
 	}
 
 	/* 即时气泡：去掉 base 的重黑阴影，换成与菜单同级的柔和投影 */
