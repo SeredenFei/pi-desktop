@@ -105,6 +105,18 @@ async function main() {
 	check("data-shell=minimal", (await page.getAttribute("html", "data-shell")) === "minimal");
 	check("不挂旧主题样式表", (await page.locator("#theme-stylesheet").count()) === 0);
 
+	console.log("1.5. 外壳不可滚动（标题栏不会被推出视口）");
+	const shellScroll = await page.evaluate(() => {
+		const app = document.querySelector(".app");
+		const overflow = app.scrollHeight - app.clientHeight;
+		app.scrollTop = 80;
+		document.querySelector(".csl")?.scrollIntoView({ block: "start" });
+		const top = document.querySelector('[data-testid="minimal-titlebar"]').getBoundingClientRect().top;
+		return { overflow, scrollTop: app.scrollTop, top };
+	});
+	check("外壳无滚动余量（状态行气泡不探出视口）", shellScroll.overflow <= 0, shellScroll);
+	check("强制滚动 / scrollIntoView 后标题栏仍在顶部", shellScroll.scrollTop === 0 && shellScroll.top === 0, shellScroll);
+
 	console.log("2. 配色");
 	check("跟随系统：浅色", (await page.getAttribute("html", "data-scheme")) === "light");
 	await page.emulateMedia({ colorScheme: "dark" });

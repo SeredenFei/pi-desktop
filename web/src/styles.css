@@ -446,6 +446,9 @@
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
+		/* clip（而非仅 hidden）：hidden 仍是可编程滚动容器，scrollIntoView / focus / 越界的
+		   隐形气泡都会把整个外壳往上推，标题栏随之「消失」。clip 彻底禁止外壳滚动。 */
+		overflow: clip;
 		/* 抬到 body 全屏壁纸层（z-index:0）之上；内部各定位元素（resize-handle
 	   z-index:10 等）的相对次序不变。无壁纸时 body 伪元素 display:none，
 	   这两行不影响布局。 */

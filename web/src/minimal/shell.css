@@ -182,6 +182,15 @@
 		background: var(--bg-elev2);
 		color: var(--text);
 	}
+	/* 状态行贴着窗口底边：即时气泡必须向上弹。base 的向下气泡会探出视口，
+	   既看不见，又把隐形的 ::after 计入滚动区域，撑出外壳的可滚动余量。 */
+	.shell-minimal .csl [data-tip]::after {
+		top: auto;
+		bottom: calc(100% + 8px);
+		left: 0;
+		right: auto;
+		transform: none;
+	}
 
 	/* ───────────────────────── 底部终端面板 ───────────────────────── */
 	.shell-minimal .term-dock {
