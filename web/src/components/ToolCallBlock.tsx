@@ -535,11 +535,7 @@ const ToolCallCard = memo(function ToolCallCard({
 	// 在折叠态下等于没展示），折叠开关的意图不是「把卡片藏起来」。
 	const [open, setOpen] = useState<boolean | null>(null);
 	const isPresent = block.name === PRESENT_FILES_TOOL_NAME;
-	const expanded = open ?? (isPresent ? true : wrap);
-	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
-	const shown = expanded || forceOpen;
-	const { copied, copy } = useCopyFeedback({ duration: 1200 });
-
+	const isAskQuestion = block.name === "ask_user_question";
 	const running = !view.result && view.streaming && !view.status;
 	const isBash = block.name === "bash";
 	const isBashRunning = isBash && (running || !view.result);
@@ -549,6 +545,13 @@ const ToolCallCard = memo(function ToolCallCard({
 	 *  the result. */
 	const waitingModel = !view.result && !!view.status;
 	const isError = view.result?.isError ?? view.status?.isError ?? false;
+	const isMinimalShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "minimal";
+	// 极简外壳下：工具正在执行或报错时自动展开，执行完成（done && !isError）后自动收起为单行摘要（除非用户手动点开）
+	const autoCollapseDone = isMinimalShell && done && !isError && !isPresent && !isAskQuestion;
+	const expanded = open ?? (isPresent ? true : autoCollapseDone ? false : wrap);
+	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
+	const shown = expanded || forceOpen;
+	const { copied, copy } = useCopyFeedback({ duration: 1200 });
 
 	const outputPreRef = useRef<HTMLPreElement>(null);
 	const outputStickRef = useRef(true);

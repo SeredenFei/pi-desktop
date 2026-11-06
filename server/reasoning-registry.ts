@@ -76,9 +76,9 @@ const KNOWN_REASONING_SPECS: {
 			],
 		},
 	},
-	// 2. Claude 4+ / 5+ 未来版本
+	// 2. Claude 4+ / 5+（含 claude-opus-4-6 / claude-opus-5-5 / claude-sonnet-5-5 等）
 	{
-		pattern: /(?:^|[-_/])claude[-_](?:[4-9]|3[-_.][8-9])/i,
+		pattern: /(?:^|[-_/])claude[-_](?:(?:opus|sonnet|haiku)[-_.]?[4-9]|[4-9]|3[-_.][8-9])/i,
 		spec: {
 			type: "budget",
 			thinkingLevelMap: STANDARD_BUDGET_MAP,
@@ -116,9 +116,9 @@ const KNOWN_REASONING_SPECS: {
 			],
 		},
 	},
-	// 4. Google Gemini 2.0 / 2.5 系列 (Flash Thinking / Pro)
+	// 4. Google Gemini 2.0 / 2.5 / 3+ / 4+ (Flash Thinking / Pro / Argon)
 	{
-		pattern: /(?:^|[-_/])gemini[-_](?:2\.[0-9]|2[-_]5)[-_](?:flash[-_]thinking|pro)/i,
+		pattern: /(?:^|[-_/])gemini[-_](?:(?:2\.[0-9]|2[-_]5)[-_](?:flash[-_]thinking|pro)|[3-9][-_](?:pro|argon|ultra|flash[-_]thinking)|4[-_]?argon)/i,
 		spec: {
 			type: "budget",
 			thinkingLevelMap: {
@@ -242,4 +242,59 @@ export function resolveModelReasoningSpec(
 	}
 
 	return undefined;
+}
+
+/** 权威已知原生多模态（支持图片输入）模型家族指纹 */
+const KNOWN_VISION_PATTERNS: RegExp[] = [
+	// Anthropic Claude 3 / 3.5 / 3.7 / 4 / 4.5 / 4.6 / 5 / 5.5 全系（Opus / Sonnet / Haiku）
+	/(?:^|[-_/])claude[-_](?:[3-9]|opus|sonnet|haiku)/i,
+	/(?:^|[-_/])(?:opus|sonnet|haiku)[-_.]?[3-9](?:[-_.]\d+)?(?:[-_/]|$)/i,
+	// Google Gemini 1.5 / 2.0 / 2.5 / 3 / 4 / Argon 全系原生多模态
+	/(?:^|[-_/])gemini[-_](?:1[._-]5|[2-9]|pro|flash|ultra|argon|exp)/i,
+	/(?:^|[-_/])(?:4[-_]?argon)(?:[-_/]|$)/i,
+	// OpenAI GPT-4o / GPT-4.1 / GPT-4.5 / GPT-5 / o1 / o3 / o4 (不含纯文本 o1-mini / o3-mini)
+	/(?:^|[-_/])(?:chatgpt[-_]4o|gpt[-_](?:4o|4[._-][15-9]|[5-9]|vision)|o[134](?![-_]mini)(?:[-_](?:pro|high|low|medium|max|preview))?(?:[-_/]|$))/i,
+	// 阿里 Qwen-VL / Qwen3.5+ / Qwen3.8 / Omni、智谱 GLM-4V、Mistral Pixtral、xAI Grok-2-Vision / Grok-3 / Grok-4、Kimi k2.5
+	/(?:^|[-_/])(?:qwen(?:[-_a-z0-9.]*)?(?:-vl|3[._-][58]|omni)|glm[-_]4v|pixtral|grok[-_](?:[3-9]|.*vision)|kimi[-_]k2[._-]5|doubao.*vision|step[-_]1v)/i,
+];
+
+/**
+ * 识别模型是否具备原生识图（Vision / Image input）能力。
+ */
+export function detectVisionCapability(modelId: string, rawMeta?: Record<string, unknown>): boolean {
+	if (rawMeta) {
+		const modalities = Array.isArray(rawMeta.modalities)
+			? rawMeta.modalities
+			: Array.isArray(rawMeta.input_modalities)
+				? rawMeta.input_modalities
+				: Array.isArray(rawMeta.input)
+					? rawMeta.input
+					: [];
+		if (modalities.some((m) => String(m).toLowerCase() === "image")) return true;
+		if (rawMeta.supports_vision === true || rawMeta.vision === true) return true;
+	}
+	const clean = (modelId ?? "").trim().toLowerCase();
+	if (!clean) return false;
+	return KNOWN_VISION_PATTERNS.some((p) => p.test(clean));
+}
+
+/**
+ * 判断运行时的模型对象是否支持图片输入：
+ * 1. 若 `model.input` 显式包含 `"image"`，返回 true；
+ * 2. 若 `model.input` 未配置或因网关缺失元数据仅默认 `["text"]`，则用权威多模态指纹（如 claude-opus-5-5、gemini-4-argon）兜底识别。
+ */
+export function supportsModelVision(
+	model?: { id?: string; name?: string; input?: readonly string[] } | null,
+): boolean {
+	if (!model) return false;
+	if (Array.isArray(model.input) && model.input.includes("image")) return true;
+	const inferred = detectVisionCapability(model.id ?? "") || detectVisionCapability(model.name ?? "");
+	if (inferred && Array.isArray(model.input) && !model.input.includes("image")) {
+		try {
+			(model.input as string[]).push("image");
+		} catch {
+			/* frozen array — ignore */
+		}
+	}
+	return inferred;
 }

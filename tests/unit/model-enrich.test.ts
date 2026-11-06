@@ -261,4 +261,22 @@ describe("signal 中断与 onProgress 进度", () => {
 		expect(r1?.reasoning).toBe(true);
 		expect(r1?.reasoningType).toBe("fixed");
 	});
+
+	it("对 claude-opus-5-5 与 gemini-4-argon 等新型号自动识别原生多模态 (image) 与思考能力", async () => {
+		const res = await enrichBatch(
+			["claude-opus-5-5-high", "gemini-4-argon", "gemini-4-argon-medium"],
+			{},
+			{
+				catalogs: fixtures(),
+				lang: "zh",
+			},
+		);
+		const opus = res.find((r) => r.id === "claude-opus-5-5-high");
+		expect(opus?.reasoning).toBe(true);
+		expect(opus?.input).toEqual(["text", "image"]);
+
+		const argon = res.find((r) => r.id === "gemini-4-argon");
+		expect(argon?.reasoning).toBe(true);
+		expect(argon?.input).toEqual(["text", "image"]);
+	});
 });

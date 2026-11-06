@@ -305,6 +305,48 @@ export function detectGitRemoteKey(cwd: string): string | null {
 	}
 }
 
+/** 识别远程工作区目录或 URI，格式化为 `🌐 远端目录名 (主机)`。 */
+export function formatRemoteWorkspaceDisplayName(cwdOrUri: string): string | null {
+	if (!cwdOrUri) return null;
+	let target = cwdOrUri.trim();
+	try {
+		const marker = join(target, ".pi-remote-uri");
+		if (existsSync(marker)) {
+			const uri = readFileSync(marker, "utf8").trim();
+			if (uri.startsWith("ssh://")) target = uri;
+		}
+	} catch {
+		/* ignore */
+	}
+	const sshMatch = /^ssh:\/\/([^@]+)@([^:/]+)(?::\d+)?(\/.*)?$/i.exec(target);
+	if (sshMatch) {
+		const user = sshMatch[1];
+		const host = sshMatch[2];
+		const rawPath = (sshMatch[3] || "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const segs = rawPath.split("/").filter(Boolean);
+		const dir = segs[segs.length - 1] || user || "/";
+		return `🌐 ${dir} (${host})`;
+	}
+	const base = basename(resolve(target));
+	const fullSlug =
+		/^([a-zA-Z0-9._-]+?)_((?:\d{1,3}\.){3}\d{1,3}|localhost|[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)_(\d+)_(.+?)(?:_([0-9a-f]{8,12}))?$/i.exec(
+			base,
+		);
+	if (fullSlug) {
+		const user = fullSlug[1];
+		const host = fullSlug[2];
+		const pathPart = fullSlug[4].replace(/_+[0-9a-f]{8,12}$/i, "");
+		const segs = pathPart.split("_").filter(Boolean);
+		const dir = segs[segs.length - 1] || user;
+		return `🌐 ${dir} (${host})`;
+	}
+	const shortSlug = /^([a-zA-Z0-9._ -]+?)[_@]+((?:\d{1,3}\.){3}\d{1,3})$/.exec(base);
+	if (shortSlug) {
+		return `🌐 ${shortSlug[1].trim()} (${shortSlug[2]})`;
+	}
+	return null;
+}
+
 /** 计算任意工作区目录对应的稳定项目记忆键与展示名。 */
 export function resolveProjectMemoryIdentity(
 	dataDir: string,
@@ -333,10 +375,11 @@ export function resolveProjectMemoryIdentity(
 	}
 	const gitKey = detectGitRemoteKey(cwd);
 	const folderName = basename(resolve(cwd)) || "workspace";
+	const displayName = formatRemoteWorkspaceDisplayName(cwd) || folderName;
 	if (gitKey) {
-		return { projectKey: gitKey, name: folderName, isChatSpace: false };
+		return { projectKey: gitKey, name: displayName, isChatSpace: false };
 	}
-	return { projectKey: `dir:${folderName.toLowerCase()}`, name: folderName, isChatSpace: false };
+	return { projectKey: `dir:${folderName.toLowerCase()}`, name: displayName, isChatSpace: false };
 }
 
 export function resolveChatSpaceDir(dataDir: string): string {
@@ -1333,15 +1376,23 @@ export class MemoryStore {
 		const workProjectsRoot = resolveWorkProjectsRoot(this.dataDir);
 		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
 		const bucket = this.doc.projects[id.projectKey];
+		const rawBucketName = bucket?.name;
+		const folderName = basename(resolve(cwd));
+		// 若旧 bucket.name 存的是未美化过的原始远程目录名，则自动升级显示为 🌐 远端目录名 (IP)
+		const effectiveProjectName =
+			rawBucketName && rawBucketName.toLowerCase() !== folderName.toLowerCase()
+				? formatRemoteWorkspaceDisplayName(rawBucketName) || rawBucketName
+				: id.name;
 		const projectNames: Record<string, string> = {};
 		for (const b of Object.values(this.doc.projects)) {
 			if (!b || b.deletedAt || !b.name) continue;
-			projectNames[b.projectKey.toLowerCase()] = b.name;
+			const cleanName = formatRemoteWorkspaceDisplayName(b.name) || b.name;
+			projectNames[b.projectKey.toLowerCase()] = cleanName;
 			if (b.slug) {
-				projectNames[`slug:${b.slug.toLowerCase()}`] = b.name;
+				projectNames[`slug:${b.slug.toLowerCase()}`] = cleanName;
 			}
-			if (b.folderName) {
-				projectNames[`dir:${b.folderName.toLowerCase()}`] = b.name;
+			if (b.folderName && b.name.toLowerCase() !== b.folderName.toLowerCase()) {
+				projectNames[`dir:${b.folderName.toLowerCase()}`] = cleanName;
 			}
 		}
 		return {
@@ -1350,7 +1401,7 @@ export class MemoryStore {
 			workProjectsRoot,
 			isChatSpace: id.isChatSpace,
 			projectKey: id.projectKey,
-			projectName: bucket?.name || id.name,
+			projectName: effectiveProjectName,
 			projectInstructions: bucket?.deletedAt ? "" : (bucket?.instructions ?? ""),
 			globalItems: this.listActiveItems("global"),
 			projectItems: this.listActiveItems("project", cwd),

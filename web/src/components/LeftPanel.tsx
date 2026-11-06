@@ -30,6 +30,7 @@ import type {
 	SessionSummary,
 } from "../types";
 import { useT } from "../i18n";
+import { formatRemoteProjectName } from "../title-settings";
 import { useAppField, useEngineCapabilities } from "../app-globals";
 import { useUnreadConversationKeys, clearConversationUnread } from "../unread-conversations";
 import { applySashDrag } from "../panel-sash";
@@ -1382,6 +1383,8 @@ export const LeftPanel = memo(function LeftPanel({
 	};
 
 	const projectName = (path: string): string => {
+		const remote = formatRemoteProjectName(path);
+		if (remote) return remote;
 		const base = path.split(/[\\/]/).pop() || path;
 		if (base === "chat-space") return "💬 独立对话";
 		return base;

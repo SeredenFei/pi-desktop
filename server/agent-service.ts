@@ -58,6 +58,7 @@ import {
 	type UpdateItem,
 } from "./update-check.js";
 import { collectInstalledEngineTargets } from "./engine-probe.js";
+import { supportsModelVision } from "./reasoning-registry.js";
 import { checkPluginUpdates } from "./plugin-updater.js";
 import { getAppVersion, getPkgRoot } from "./pkg-info.js";
 import { isBundledInUse, sdkCopies } from "./sdk-origin.js";
@@ -8141,7 +8142,7 @@ export class ClientSession {
 	 *    刷新也不会补发，硬等一个超时对模型毫无信息量）。 */
 	/** 当前对话模型能不能直接看图 —— 决定截图是「给图」还是「走视觉桥」。 */
 	canSeeImages(): boolean {
-		return this.session?.model?.input?.includes("image") === true;
+		return supportsModelVision(this.session?.model);
 	}
 
 	/**
@@ -11949,7 +11950,7 @@ export class ClientSession {
 				});
 			}
 
-			const mainSupportsVision = s.model?.input?.includes("image") ?? false;
+			const mainSupportsVision = supportsModelVision(s.model);
 			const modelLabel = s.model?.name ?? s.model?.id ?? "unknown";
 
 			// 单源流式投递执行器：无论进入时已处于流式还是中途跃迁为流式，均通过单源解构提取
@@ -16886,7 +16887,7 @@ export class ClientSession {
 					name: this.cleanModelDisplayName(m.name),
 					provider: m.provider,
 					reasoning: m.reasoning,
-					vision: m.input?.includes("image") ?? false,
+					vision: supportsModelVision(m),
 					...(enabledSet ? { enabled: enabledSet.has(fullId) } : {}),
 				};
 			});

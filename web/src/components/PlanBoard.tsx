@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	FiCheckCircle,
 	FiClock,
@@ -48,13 +48,36 @@ export function PlanBoard({ plan }: PlanBoardProps) {
 	const [editTitle, setEditTitle] = useState("");
 	const [editDesc, setEditDesc] = useState("");
 
-	if (!plan || !plan.steps || plan.steps.length === 0) {
+	const steps = plan?.steps ?? [];
+	const doneCount = steps.filter((s) => s.status === "done").length;
+	const totalCount = steps.length;
+	const allDone = totalCount > 0 && doneCount === totalCount;
+	const wasIncompleteRef = useRef(!allDone && totalCount > 0);
+	const [autoCollapsedDone, setAutoCollapsedDone] = useState(() => allDone);
+
+	useEffect(() => {
+		if (!allDone) {
+			if (totalCount > 0) wasIncompleteRef.current = true;
+			setAutoCollapsedDone(false);
+			return;
+		}
+		// 全部步骤完成时：立即收起展开面板，并在简短停留后自动收起整个完成条
+		setExpanded(false);
+		if (!wasIncompleteRef.current) {
+			setAutoCollapsedDone(true);
+			return;
+		}
+		const timer = setTimeout(() => {
+			setAutoCollapsedDone(true);
+		}, 1200);
+		return () => clearTimeout(timer);
+	}, [allDone, totalCount]);
+
+	const isMinimalShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "minimal";
+	if (!plan || !plan.steps || plan.steps.length === 0 || (isMinimalShell && allDone && autoCollapsedDone)) {
 		return null;
 	}
 
-	const steps = plan.steps;
-	const doneCount = steps.filter((s) => s.status === "done").length;
-	const totalCount = steps.length;
 	const percent = Math.round((doneCount / totalCount) * 100);
 
 	const activeStep = steps.find((s) => s.id === plan.activeStepId) ?? steps.find((s) => s.status === "in_progress");

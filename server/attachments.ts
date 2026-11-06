@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { isAbsoluteWirePath, wireToAbs } from "./files-service.js";
 import { buildVisionBridgePrompt, findVisionModels, transcribeImages } from "./vision-bridge.js";
+import { supportsModelVision } from "./reasoning-registry.js";
 import { saveAttachment } from "./attachment-store.js";
 import type { ClientSettings } from "./client-state.js";
 import {
@@ -179,7 +180,7 @@ export async function buildAttachmentMessages(
 	// "image" works, zero extra config). Vision-capable main models keep
 	// the raw image-content path untouched.
 	const mainModel = ctx.session.model;
-	const mainSupportsVision = mainModel?.input?.includes("image") ?? false;
+	const mainSupportsVision = supportsModelVision(mainModel);
 	const bridgedImages: {
 		idx: number;
 		att: (typeof attachments)[number];
@@ -268,7 +269,7 @@ export async function buildAttachmentMessages(
 				const spec = parseModelSpec(pref);
 				if (spec) {
 					const pm = ctx.session.modelRuntime.getModel(spec.provider, spec.id);
-					if (pm?.input?.includes("image")) {
+					if (pm && supportsModelVision(pm)) {
 						chosen = {
 							provider: spec.provider,
 							id: spec.id,

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { FiArrowLeft, FiChevronDown, FiCommand, FiFolder, FiMenu, FiSidebar, FiTerminal } from "react-icons/fi";
 import { appSend, useAppField } from "../app-globals";
 import { appUrl } from "../base-url";
+import { formatRemoteProjectName } from "../title-settings";
 import { useT } from "../i18n";
 import type { UiSlotEntry } from "../ui-slots";
 import type { ChatState } from "../use-chat";
@@ -32,8 +33,12 @@ export interface MinimalTitleBarProps {
 }
 
 function basename(p: string): string {
+	const remote = formatRemoteProjectName(p);
+	if (remote) return remote;
 	const parts = p.split(/[\\/]+/).filter(Boolean);
-	return parts[parts.length - 1] ?? p;
+	const last = parts[parts.length - 1] ?? p;
+	if (last === "chat-space") return "💬 独立对话";
+	return last;
 }
 
 /**

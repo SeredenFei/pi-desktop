@@ -18,6 +18,7 @@
  */
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { getServerBlock, pick, type ServerLang } from "./i18n.js";
+import { supportsModelVision } from "./reasoning-registry.js";
 
 // TypeScript can't import pi-ai's `Model`/`Context` directly (it's a nested
 // dependency of pi-coding-agent), so derive them from completeSimple's
@@ -53,7 +54,7 @@ export function findVisionModels(runtime: ModelRuntime): VisionModelRef[] {
 		// unless the user added auth, and calling them would just fail.
 		if (!runtime.hasConfiguredAuth(p.id)) continue;
 		for (const m of runtime.getModels(p.id)) {
-			if (m.input?.includes("image")) {
+			if (supportsModelVision(m)) {
 				out.push({
 					provider: p.id,
 					id: m.id,

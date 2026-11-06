@@ -2804,7 +2804,10 @@ export function App() {
 			}
 			const map = memory.view?.projectNames;
 			if (!map) return undefined;
-			return map[`dir:${base}`] || map[`slug:${base}`] || map[`chat-project:${base}`];
+			const candidate = map[`dir:${base}`] || map[`slug:${base}`] || map[`chat-project:${base}`];
+			// 若 candidate 只是未手动改名时的原始目录名，则交给 formatRemoteProjectName / 默认名处理
+			if (!candidate || candidate.toLowerCase() === base) return undefined;
+			return candidate;
 		},
 		[memory.view?.chatProjects, memory.view?.projectNames, normModePath],
 	);
@@ -3059,7 +3062,7 @@ export function App() {
 					plugins={enabledPlugins}
 					projectPickerOpen={projectPickerOpen}
 					onProjectPickerOpenChange={setProjectPickerOpen}
-					projectName={resolveCustomProjectName(cwd) || memory.view?.projectName}
+					projectName={resolveCustomProjectName(cwd)}
 				/>
 			) : (
 				<TopBar

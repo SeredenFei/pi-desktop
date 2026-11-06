@@ -31,11 +31,58 @@ export function normalizeTitleSettings(raw: unknown): TitleSettings {
 }
 
 /**
- * 从工作目录取项目名（末级文件夹名）。
+ * 识别远程 SSH 工作区路径（`ssh://user@host[:port]/path` 或本地映射的
+ * `remote-workspaces/<user>_<host>_<port>_<path>_<hash>` / `<user>_<ip>`），
+ * 返回 `🌐 远端目录名 (主机)` 的简洁展示名；普通本地路径返回 null。
+ */
+export function formatRemoteProjectName(pathOrUri: string): string | null {
+	if (!pathOrUri) return null;
+	const trimmed = pathOrUri.trim();
+	const sshMatch = /^ssh:\/\/([^@]+)@([^:/]+)(?::\d+)?(\/.*)?$/i.exec(trimmed);
+	if (sshMatch) {
+		const user = sshMatch[1];
+		const host = sshMatch[2];
+		const rawPath = (sshMatch[3] || "").replace(/\\/g, "/").replace(/\/+$/, "");
+		const segs = rawPath.split("/").filter(Boolean);
+		const dir = segs[segs.length - 1] || user || "/";
+		return `🌐 ${dir} (${host})`;
+	}
+
+	const clean = trimmed.replace(/[\\/]+$/, "");
+	const base = clean.split(/[\\/]/).pop() ?? "";
+	if (!base) return null;
+
+	const fullSlug =
+		/^([a-zA-Z0-9._-]+?)_((?:\d{1,3}\.){3}\d{1,3}|localhost|[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)_(\d+)_(.+?)(?:_([0-9a-f]{8,12}))?$/i.exec(
+			base,
+		);
+	if (fullSlug) {
+		const user = fullSlug[1];
+		const host = fullSlug[2];
+		const pathPart = fullSlug[4].replace(/_+[0-9a-f]{8,12}$/i, "");
+		const segs = pathPart.split("_").filter(Boolean);
+		const dir = segs[segs.length - 1] || user;
+		return `🌐 ${dir} (${host})`;
+	}
+
+	const shortSlug = /^([a-zA-Z0-9._ -]+?)[_@]+((?:\d{1,3}\.){3}\d{1,3})$/.exec(base);
+	if (shortSlug) {
+		const user = shortSlug[1].trim();
+		const host = shortSlug[2];
+		return `🌐 ${user} (${host})`;
+	}
+
+	return null;
+}
+
+/**
+ * 从工作目录取项目名（末级文件夹名；远程工作区自动格式化为 `🌐 目录名 (IP)`）。
  * 兼容 POSIX / Windows 分隔符，容忍尾随分隔符；根目录 / 空串返回 ""。
  */
 export function projectNameFromCwd(cwd: string): string {
 	if (!cwd) return "";
+	const remote = formatRemoteProjectName(cwd);
+	if (remote) return remote;
 	const trimmed = cwd.replace(/[\\/]+$/, "");
 	const name = trimmed.split(/[\\/]/).pop() ?? "";
 	return name;

@@ -9,7 +9,7 @@
  * 纯函数 + 可注入的抓取层（fetchFn/pageFetch），单测覆盖零网络。
  */
 import type { UiEnrichResult } from "./protocol.js";
-import { resolveModelReasoningSpec } from "./reasoning-registry.js";
+import { detectVisionCapability, resolveModelReasoningSpec } from "./reasoning-registry.js";
 
 /** 目录里归一化后的一个模型（已抹平两源字段差异）。 */
 export interface CatalogModel {
@@ -338,12 +338,13 @@ function toResult(
 ): UiEnrichResult {
 	const reasoningSpec = resolveModelReasoningSpec(id) ?? resolveModelReasoningSpec(model.id);
 	const isReasoning = Boolean(model.reasoning || reasoningSpec);
+	const isVision = Boolean(model.vision || detectVisionCapability(id) || detectVisionCapability(model.id));
 	return {
 		id,
 		status: "matched",
 		...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
 		...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
-		...(model.vision ? { input: ["text", "image"] } : {}),
+		...(isVision ? { input: ["text", "image"] } : {}),
 		...(isReasoning ? { reasoning: true } : {}),
 		...(reasoningSpec?.thinkingLevelMap ? { thinkingLevelMap: reasoningSpec.thinkingLevelMap } : {}),
 		...(reasoningSpec?.type ? { reasoningType: reasoningSpec.type } : {}),
@@ -542,9 +543,11 @@ export async function enrichBatch(
 		}
 		const suggestions = familySuggestions(norm, indexes());
 		const reasoningSpec = resolveModelReasoningSpec(id);
+		const isVision = detectVisionCapability(id);
 		results.push({
 			id,
 			status: suggestions.length ? "suggested" : "unmatched",
+			...(isVision ? { input: ["text", "image"] } : {}),
 			...(reasoningSpec
 				? { reasoning: true, thinkingLevelMap: reasoningSpec.thinkingLevelMap, reasoningType: reasoningSpec.type }
 				: {}),
