@@ -173,7 +173,9 @@
 		--menu-bg: #ffffff;
 		--chip-bg: #efece4;
 		--inputbox-bg: #ffffff;
-		--tooltip-bg: #2b2a27;
+		/* 浅色气泡用亮底：所有气泡消费方都写死 color: var(--text)（深色字），
+		   深底会变成「黑底黑字」的一块黑色色块。 */
+		--tooltip-bg: #ffffff;
 
 		--green: #2f8f5b;
 		--green-soft: rgba(47, 143, 91, 0.1);

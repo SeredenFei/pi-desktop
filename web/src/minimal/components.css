@@ -575,6 +575,26 @@
 		background: var(--green);
 	}
 
+	/* 即时气泡：去掉 base 的重黑阴影，换成与菜单同级的柔和投影 */
+	html[data-shell="minimal"] :is([data-tip], .file-attach, .fp-attach)::after {
+		box-shadow: 0 6px 18px var(--glow-12);
+	}
+
+	/* 引擎（智能体内核）胶囊与切换菜单：去掉紫色描边，统一到赤陶强调色 */
+	html[data-shell="minimal"] .engine-badge.engine-pi,
+	html[data-shell="minimal"] .engine-picker-item.active {
+		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+	}
+	.shell-minimal .csl .engine-picker-btn {
+		gap: 5px;
+	}
+	.shell-minimal .csl .engine-badge {
+		padding: 0 5px;
+		border-radius: 4px;
+		font-size: 10px;
+		line-height: 15px;
+	}
+
 	/* 记忆与跨端同步弹窗 */
 	html[data-shell="minimal"] .modal.memory-modal {
 		max-width: 680px;

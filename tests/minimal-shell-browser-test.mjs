@@ -197,6 +197,22 @@ async function main() {
 		.evaluateAll((els) => els.map((e) => e.getAttribute("data-bar-item")));
 	check("状态行含引擎", statusItems.includes("host:engine"), statusItems);
 	check("状态行含上下文", statusItems.includes("host:ctx"), statusItems);
+	const engineTip = await page.evaluate(() => {
+		const lum = (c) => {
+			const [r, g, b] = (c.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+				const s = Number(v) / 255;
+				return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+			});
+			return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+		};
+		const btn = document.querySelector('[data-testid="composer-status-line"] .engine-picker-btn');
+		const tip = getComputedStyle(btn, "::after");
+		const [a, b] = [lum(tip.backgroundColor), lum(tip.color)].sort((x, y) => y - x);
+		const badge = getComputedStyle(btn.querySelector(".engine-badge")).borderColor;
+		return { contrast: (a + 0.05) / (b + 0.05), bottom: tip.bottom, top: tip.top, badge };
+	});
+	check("引擎气泡文字可读（对比度 ≥ 4.5，不再黑底黑字）", engineTip.contrast >= 4.5, engineTip);
+	check("引擎徽标不再使用紫色描边", !engineTip.badge.includes("139, 92, 246"), engineTip.badge);
 
 	console.log("8. P3：无内容时隐藏 GoalBar 药丸，命令面板可展开目标栏，且不再暴露旧主题/经典布局入口");
 	check("无目标时 .goalbar-collapsed 隐藏", !(await page.isVisible(".goalbar-collapsed")));
