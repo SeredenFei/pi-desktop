@@ -244,6 +244,25 @@ async function main() {
 	);
 	await page.click('[data-testid="toggle-memory-isolated"]');
 	await sleep(200);
+	await page.locator(".mem-tab").nth(1).click();
+	await sleep(200);
+	const memLayout = await page.evaluate(() => {
+		const tab = document.querySelectorAll(".mem-tab")[1];
+		const pane = [...document.querySelector(".mem-pane").children].map((c) => c.className);
+		const name = document.querySelector('[data-testid="mem-project-name"]');
+		return {
+			tabText: tab.textContent,
+			nameH: name?.getBoundingClientRect().height ?? 0,
+			first: pane[0],
+			last: pane[pane.length - 1],
+		};
+	});
+	check("项目记忆标签不再拼接长目录名", /^项目记忆 \(\d+\)$/.test(memLayout.tabText ?? ""), memLayout);
+	check(
+		"项目面板：项目头卡单行居顶、新建话题项目沉底",
+		memLayout.first === "mem-proj-head" && memLayout.last.includes("mem-create-proj-foot") && memLayout.nameH < 24,
+		memLayout,
+	);
 	await page.click('[data-testid="mem-tab-sync"]');
 	await sleep(200);
 	check("云同步标签页展示已同步数据总览面板", await page.isVisible('[data-testid="mem-sync-overview"]'));

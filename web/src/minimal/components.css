@@ -708,11 +708,15 @@
 	}
 	.mem-tabs {
 		display: flex;
+		align-items: center;
 		gap: 6px;
 		border-bottom: 1px solid var(--border-soft);
 		padding-bottom: 6px;
+		overflow-x: auto;
 	}
 	.mem-tab {
+		flex: none;
+		white-space: nowrap;
 		height: 30px;
 		padding: 0 12px;
 		border: 0;
@@ -728,6 +732,63 @@
 		background: var(--bg-elev2);
 		color: var(--text);
 		font-weight: 600;
+	}
+	.mem-tab-sync {
+		margin-left: auto;
+		gap: 4px;
+	}
+	.mem-iso-bar .btn {
+		flex: none;
+		white-space: nowrap;
+	}
+	/* 项目记忆：当前项目头卡（长目录名单行省略，完整路径见 title） */
+	.mem-proj-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		padding: 8px 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		font-size: 13px;
+	}
+	.mem-proj-icon {
+		flex: none;
+		color: var(--text-faint);
+	}
+	.mem-proj-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.mem-proj-meta {
+		flex: none;
+		font-size: 12px;
+		color: var(--text-faint);
+	}
+	.mem-inst-box {
+		display: flex;
+		flex-direction: column;
+	}
+	.mem-textarea {
+		min-height: 76px;
+		line-height: 1.55;
+		resize: vertical;
+	}
+	/* 新建话题项目是次要动作：沉到项目面板底部，用分隔线与当前项目的内容区分 */
+	.mem-create-proj-foot {
+		margin-top: 4px;
+		padding-top: 12px;
+		border-top: 1px dashed var(--border);
+	}
+	.mem-create-proj-foot > svg {
+		flex: none;
+		color: var(--text-faint);
 	}
 	.mem-pane {
 		display: flex;
@@ -813,6 +874,7 @@
 		font-weight: 600;
 		color: var(--text-dim);
 		margin-top: 4px;
+		margin-bottom: -4px;
 	}
 	.mem-sync-card {
 		display: flex;

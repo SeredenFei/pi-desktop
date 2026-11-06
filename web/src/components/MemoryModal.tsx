@@ -5,6 +5,7 @@ import {
 	FiCheck,
 	FiCloud,
 	FiCopy,
+	FiFolder,
 	FiFolderPlus,
 	FiLock,
 	FiMessageCircle,
@@ -509,15 +510,13 @@ export function MemoryModal({
 						className={`mem-tab${tab === "project" ? " active" : ""}`}
 						onClick={() => setTab("project")}
 					>
-						{zh
-							? `项目记忆 · ${isChatSpace ? "独立空间" : (view?.projectName ?? "")} (${projectItems.length})`
-							: `Project (${projectItems.length})`}
+						{zh ? `项目记忆 (${projectItems.length})` : `Project (${projectItems.length})`}
 					</button>
 					<button
 						type="button"
 						role="tab"
 						aria-selected={tab === "sync"}
-						className={`mem-tab${tab === "sync" ? " active" : ""}`}
+						className={`mem-tab mem-tab-sync${tab === "sync" ? " active" : ""}`}
 						onClick={() => setTab("sync")}
 						data-testid="mem-tab-sync"
 					>
@@ -629,46 +628,6 @@ export function MemoryModal({
 
 				{tab === "project" && (
 					<div className="mem-pane">
-						{/* 新建或切换云端话题项目 */}
-						<div className="mem-create-proj">
-							<FiFolderPlus />
-							<input
-								type="text"
-								className="mem-input"
-								value={newChatProjName}
-								placeholder={
-									zh
-										? "新建云端话题项目（如：论文润色、Rust 学习，可跨端同步）…"
-										: "New topic project name (synced across devices)…"
-								}
-								onChange={(e) => setNewChatProjName(e.target.value)}
-							/>
-							<button
-								type="button"
-								className="btn secondary"
-								disabled={!newChatProjName.trim() || busy}
-								onClick={async () => {
-									const name = newChatProjName.trim();
-									setNewChatProjName("");
-									setBusy(true);
-									try {
-										const res = await apiPostMemory("/api/memory/chat-project", { name, sessionId });
-										setMemory(res);
-										if (res.created?.path) {
-											onSwitchCwd(res.created.path);
-										}
-									} catch (e) {
-										setErrMsg((e as Error).message);
-									} finally {
-										setBusy(false);
-									}
-								}}
-								data-testid="mem-create-chat-project"
-							>
-								{zh ? "新建并进入" : "Create"}
-							</button>
-						</div>
-
 						{isChatSpace ? (
 							<div className="mem-empty">
 								{zh
@@ -677,9 +636,16 @@ export function MemoryModal({
 							</div>
 						) : (
 							<>
-								<div className="mem-sec-label">
-									{zh ? `项目专属指令（${view?.projectName}）` : `Project Instructions (${view?.projectName})`}
+								<div className="mem-proj-head" title={cwd}>
+									<FiFolder className="mem-proj-icon" />
+									<span className="mem-proj-name" data-testid="mem-project-name">
+										{view?.projectName}
+									</span>
+									<span className="mem-proj-meta">
+										{zh ? `${projectItems.length} 条记忆` : `${projectItems.length} memories`}
+									</span>
 								</div>
+								<div className="mem-sec-label">{zh ? "项目专属指令" : "Project Instructions"}</div>
 								<div className="mem-inst-box">
 									<textarea
 										className="mem-textarea"
@@ -829,6 +795,45 @@ export function MemoryModal({
 								)}
 							</>
 						)}
+						{/* 新建或切换云端话题项目 */}
+						<div className="mem-create-proj mem-create-proj-foot">
+							<FiFolderPlus />
+							<input
+								type="text"
+								className="mem-input"
+								value={newChatProjName}
+								placeholder={
+									zh
+										? "新建云端话题项目（如：论文润色、Rust 学习，可跨端同步）…"
+										: "New topic project name (synced across devices)…"
+								}
+								onChange={(e) => setNewChatProjName(e.target.value)}
+							/>
+							<button
+								type="button"
+								className="btn secondary"
+								disabled={!newChatProjName.trim() || busy}
+								onClick={async () => {
+									const name = newChatProjName.trim();
+									setNewChatProjName("");
+									setBusy(true);
+									try {
+										const res = await apiPostMemory("/api/memory/chat-project", { name, sessionId });
+										setMemory(res);
+										if (res.created?.path) {
+											onSwitchCwd(res.created.path);
+										}
+									} catch (e) {
+										setErrMsg((e as Error).message);
+									} finally {
+										setBusy(false);
+									}
+								}}
+								data-testid="mem-create-chat-project"
+							>
+								{zh ? "新建并进入" : "Create"}
+							</button>
+						</div>
 					</div>
 				)}
 
