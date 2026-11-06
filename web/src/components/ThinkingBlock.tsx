@@ -108,10 +108,10 @@ interface ThinkingBlockProps {
 export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = false }: ThinkingBlockProps) {
 	const t = useT();
 	// null = 未手动点过 → 跟随开关：wrap=true（开）→ 完整展开；wrap=false（关）→ 折叠。
-	// 极简外壳下：思考流式进行时可展开，思考完成后若未手动点开则自动收起为单行摘要。
+	// 极简外壳下：思考块默认始终收起为单行摘要（流式中实时滚动显示最新一行，手动点击才展开全文）。
 	const [open, setOpen] = useState<boolean | null>(null);
 	const isMinimalShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "minimal";
-	const expanded = open ?? (isMinimalShell && !streaming ? false : wrap);
+	const expanded = open ?? (isMinimalShell ? false : wrap);
 	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
 	const shown = expanded || forceOpen;
 

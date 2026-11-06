@@ -1037,7 +1037,16 @@ export function reducer(state: ChatState, action: Action): ChatState {
 			const nextCwd = action.state.cwd;
 			let nextSessions = state.sessions;
 			if (nextCwd && nextCwd !== prevCwd) {
-				nextSessions = readCachedSessions(nextCwd, state.engine);
+				const normNext = normalizeSessionPathKey(nextCwd);
+				const fromProjectMap = state.projectSessions?.[normNext];
+				const cached = readCachedSessions(nextCwd, state.engine);
+				if (fromProjectMap && fromProjectMap.length > 0) {
+					nextSessions = fromProjectMap;
+				} else if (cached.length > 0) {
+					nextSessions = cached;
+				} else {
+					nextSessions = state.sessions.filter((s) => isSessionMatchingProject(s.path, nextCwd));
+				}
 			}
 			const normPath = (s?: string) => (s ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 			let nextTransition = state.transition;
@@ -1246,20 +1255,23 @@ export function reducer(state: ChatState, action: Action): ChatState {
 		case "engines_status":
 			return { ...state, engines: action.engines };
 		case "sessions": {
-			const targetCwd = action.cwd;
-			const isCurrent = !targetCwd || normalizeSessionPathKey(targetCwd) === normalizeSessionPathKey(state.state?.cwd);
-			if (isCurrent) {
-				writeCachedSessions(state.state?.cwd, action.sessions, state.engine);
-				return { ...state, sessions: action.sessions };
+			const targetCwd = action.cwd || state.state?.cwd;
+			const normTarget = targetCwd ? normalizeSessionPathKey(targetCwd) : "";
+			const isCurrent = !action.cwd || normTarget === normalizeSessionPathKey(state.state?.cwd);
+			if (targetCwd) {
+				writeCachedSessions(targetCwd, action.sessions, state.engine);
 			}
-			writeCachedSessions(targetCwd, action.sessions, state.engine);
-			const normTarget = normalizeSessionPathKey(targetCwd);
 			return {
 				...state,
-				projectSessions: {
-					...(state.projectSessions ?? {}),
-					[normTarget]: action.sessions,
-				},
+				...(isCurrent ? { sessions: action.sessions } : {}),
+				...(normTarget
+					? {
+							projectSessions: {
+								...(state.projectSessions ?? {}),
+								[normTarget]: action.sessions,
+							},
+						}
+					: {}),
 			};
 		}
 		case "conversations":
@@ -1899,11 +1911,30 @@ export function isSessionMatchingProject(sessionPath?: string | null, projectPat
 	// 纯文件名（不含任何目录斜杠，常见于测试 mock 数据）：直接放行
 	if (!normS.includes("/")) return true;
 
-	if (normS.startsWith(normP + "/")) return true;
+	// SDK session slug 完整匹配：如 "--e--t--"、"--c--users-c-desktop--" 或 POSIX "--users-sereden-pi-desktop--"
+	const fullSlug = normP.replace(/^\/+/, "").replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+	if (fullSlug && normS.includes(`--${fullSlug}--`)) return true;
 
-	// SDK session slug 完整匹配：如 "--e--t--" 或 "--c--users-c-desktop--"
-	const fullSlug = normP.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
-	if (normS.includes(`--${fullSlug}--`)) return true;
+	// 若会话路径位于标准 SDK sessions 子目录 `/--<slug>--/` 下，则以该 `<slug>` 为唯一权威归属依据，
+	// 严禁被外层宿主主目录（如 `/Users/sereden/.pi/agent/sessions/...`）的前缀或同名父目录误匹配。
+	// 注意：SDK 生成目录名时保留了空格（如 `Application Support`），因此比对前需统一将非字母数字归一化为 `-`。
+	const sdkSlugMatch = normS.match(/\/--([^/]+)--\//);
+	if (sdkSlugMatch) {
+		const rawSessionSlug = sdkSlugMatch[1]!;
+		const normSessionSlug = rawSessionSlug.replace(/[^a-zA-Z0-9]/g, "-");
+		if (normSessionSlug === fullSlug) return true;
+		// 远程 SSH 工作区（ssh://user@host:port/path）本地投影在 `remote-workspaces/<slug>_<hash>` 下
+		if (normP.startsWith("ssh://") && rawSessionSlug.includes("remote-workspaces-")) {
+			const folderName = normP.split("/").filter(Boolean).pop();
+			if (folderName) {
+				const slugPattern = new RegExp(`[-_]${folderName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[-_]`, "i");
+				if (slugPattern.test(rawSessionSlug)) return true;
+			}
+		}
+		return false;
+	}
+
+	if (normS.startsWith(normP + "/")) return true;
 
 	const folderName = normP.split("/").filter(Boolean).pop();
 	if (folderName) {
@@ -2589,7 +2620,7 @@ export function useChat() {
 					dispatch({ type: "engines_status", engines: msg.engines });
 					break;
 				case "sessions":
-					dispatch({ type: "sessions", sessions: msg.sessions });
+					dispatch({ type: "sessions", sessions: msg.sessions, cwd: msg.cwd });
 					break;
 				case "conversations":
 					dispatch({

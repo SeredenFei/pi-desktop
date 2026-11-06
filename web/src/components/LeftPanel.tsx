@@ -528,9 +528,33 @@ export const LeftPanel = memo(function LeftPanel({
 		return list;
 	}, [projects, conversations, elsewhere, singleProjectFocus, removedProjectAt]);
 
-	// 2. 方案 A：会话内位置锁定（Deferred MRU · 稳定空间记忆）
-	// 按项目初次呈现时的 Rank 锁定相对排位，用户在当前窗口点击切换时绝对在原地展开，不发生动态瞬移
+	// 2. 方案 A：会话内位置锁定 + 实际对话驱动置顶
+	// 平时点击查看项目/历史会话时保持原位不跳动；当项目内真正产生对话（流式回复中）时自动移至最上方
 	const projectRankMapRef = useRef<Map<string, number>>(new Map());
+	const convActiveTimeRef = useRef<Map<string, number>>(new Map());
+
+	for (const c of conversations) {
+		if (c.isStreaming || c.completionPending) {
+			const nowTs = Date.now();
+			convActiveTimeRef.current.set(c.id, nowTs);
+			if (c.sessionFile) {
+				convActiveTimeRef.current.set(normalizeSessionPathKey(c.sessionFile), nowTs);
+			}
+			if (c.cwd) {
+				const normCwd = normalizeSessionPathKey(c.cwd);
+				const rankMap = projectRankMapRef.current;
+				let minRank = 0;
+				for (const r of rankMap.values()) {
+					if (r < minRank) minRank = r;
+				}
+				if ((rankMap.get(normCwd) ?? 0) > minRank || !rankMap.has(normCwd)) {
+					rankMap.set(normCwd, minRank - 1);
+				}
+			}
+		} else if (c.messageCount === 0 && !c.sessionFile && !convActiveTimeRef.current.has(c.id)) {
+			convActiveTimeRef.current.set(c.id, Date.now());
+		}
+	}
 
 	const stableProjects = useMemo(() => {
 		const rankMap = projectRankMapRef.current;
@@ -543,7 +567,7 @@ export const LeftPanel = memo(function LeftPanel({
 			}
 		});
 
-		// 按照锁定的物理排位渲染，操作期间零视觉抖动
+		// 按照锁定的物理排位渲染，操作期间零视觉抖动；有实际对话发生时自动置顶
 		return [...deduplicatedProjects].sort((a, b) => {
 			const keyA = normalizeSessionPathKey(a.path);
 			const keyB = normalizeSessionPathKey(b.path);
@@ -551,7 +575,7 @@ export const LeftPanel = memo(function LeftPanel({
 			const rankB = rankMap.get(keyB) ?? 0;
 			return rankA - rankB;
 		});
-	}, [deduplicatedProjects]);
+	}, [deduplicatedProjects, conversations]);
 
 	const effectiveProjects = stableProjects;
 
@@ -1568,6 +1592,16 @@ export const LeftPanel = memo(function LeftPanel({
 					disabled={switching}
 					onClick={() => {
 						if (renaming || switching) return;
+						if (projectPath) {
+							const pNorm = normalizeSessionPathKey(projectPath);
+							setFocusedProjectNorm(pNorm);
+							setCollapsedCurrentProjects((prev) => {
+								if (!prev.has(pNorm)) return prev;
+								const next = new Set(prev);
+								next.delete(pNorm);
+								return next;
+							});
+						}
 						clearConversationUnread(s.path);
 						if (s.sessionId) clearConversationUnread(s.sessionId);
 						if (runInfo?.conv?.id) clearConversationUnread(runInfo.conv.id);
@@ -1707,6 +1741,7 @@ export const LeftPanel = memo(function LeftPanel({
 	const renderSingleConvRow = (
 		{ c, depth, hasKids, isCollapsed, descendantCount, hasStreaming, hasError, hasQuestion }: ConvRowItem,
 		projectPath?: string,
+		modifiedTs?: number,
 	) => {
 		if ((c as RowConv).elsewhere) {
 			const elseOwner = (c as RowConv).owner;
@@ -1964,6 +1999,16 @@ export const LeftPanel = memo(function LeftPanel({
 					className={`session-item lp-tree-session-item ${active ? "active" : ""}${isActuallyRunning ? " is-running" : ""}${isUnread ? " is-unread" : ""}`}
 					title={`${c.title}${projectPath ? "" : ` — ${c.cwd}`}`}
 					onClick={() => {
+						if (projectPath) {
+							const pNorm = normalizeSessionPathKey(projectPath);
+							setFocusedProjectNorm(pNorm);
+							setCollapsedCurrentProjects((prev) => {
+								if (!prev.has(pNorm)) return prev;
+								const next = new Set(prev);
+								next.delete(pNorm);
+								return next;
+							});
+						}
 						clearConversationUnread(c.id);
 						if (c.sessionId) clearConversationUnread(c.sessionId);
 						if (c.sessionFile) clearConversationUnread(c.sessionFile);
@@ -2027,6 +2072,8 @@ export const LeftPanel = memo(function LeftPanel({
 								{presetNames?.[c.agentPreset] ?? c.agentPreset}
 							</span>
 						)}
+
+						{modifiedTs ? <span className="conv-time">{formatModified(modifiedTs)}</span> : null}
 					</span>
 				</button>
 				{!isArmed && (
@@ -2342,19 +2389,42 @@ export const LeftPanel = memo(function LeftPanel({
 											if (c.sessionId) claimedSessionIds.add(c.sessionId.trim().toLowerCase());
 										}
 
-										// 2. 基础磁盘历史会话列表（当前项目用 sessions，其他项目优先读 projectSessions 或本地缓存）
+										// 2. 基础磁盘历史会话列表（当前项目优先合并 sessions 与 projectSessions/本地缓存，避免切换瞬间被空数组冲掉）
 										const pStateSessions = projectSessions?.[pNorm];
+										const pFallbackSessions = pStateSessions ?? readCachedSessions(p.path, engine) ?? [];
 										const pRawSessions = active
-											? sessions
-											: (pStateSessions ?? readCachedSessions(p.path, engine) ?? []);
+											? sessions.length > 0 && sessions.some((s) => isSessionMatchingProject(s.path, p.path))
+												? sessions
+												: pFallbackSessions
+											: pFallbackSessions;
 										// 只要服务端已返回过该项目的 projectSessions（哪怕是空数组 []），加载即已完成，不再永久显示「正在读取会话…」
 										const isLoadingSessions =
 											loadingProjects.has(pNorm) && pStateSessions === undefined && pRawSessions.length === 0;
 
 										// 3. 最佳落地实践：物理路径确定性归属过滤 + 全局排他去重
 										// 任何物理路径不属于当前项目的会话，一律在物理层被拒收，绝不可能跨项目窜门
-										const idleSessions = pRawSessions.filter((s) => {
-											if (!isSessionMatchingProject(s.path, p.path)) return false;
+										const pMatchingSessions = pRawSessions.filter((s) => isSessionMatchingProject(s.path, p.path));
+										const sessionByNormPath = new Map<string, SessionSummary>();
+										const sessionById = new Map<string, SessionSummary>();
+										for (const s of pMatchingSessions) {
+											const sNorm = normalizeSessionPathKey(s.path);
+											if (sNorm) sessionByNormPath.set(sNorm, s);
+											const sId = s.sessionId?.trim().toLowerCase() || extractSessionIdFromPath(s.path)?.toLowerCase();
+											if (sId) sessionById.set(sId, s);
+										}
+
+										const findMatchingSession = (c: RowConv): SessionSummary | undefined => {
+											if (c.sessionFile) {
+												const hit = sessionByNormPath.get(normalizeSessionPathKey(c.sessionFile));
+												if (hit) return hit;
+											}
+											const cid =
+												c.sessionId?.trim().toLowerCase() || extractSessionIdFromPath(c.sessionFile)?.toLowerCase();
+											if (cid) return sessionById.get(cid);
+											return undefined;
+										};
+
+										const idleSessions = pMatchingSessions.filter((s) => {
 											const sNorm = normalizeSessionPathKey(s.path);
 											if (sNorm && claimedSessionPaths.has(sNorm)) return false;
 											const sId = s.sessionId?.trim().toLowerCase() || extractSessionIdFromPath(s.path)?.toLowerCase();
@@ -2384,10 +2454,82 @@ export const LeftPanel = memo(function LeftPanel({
 										const unreadCount = unreadRunningCount + unreadHistoryCount;
 										const hasUnread = unreadCount > 0;
 
-										// 5. 数量截断与分页展开
+										// 5. 数量截断与分页展开 + 统一按对话时间排序（仅在真正发生对话或新建时置顶，纯点击查看保持原位）
 										const maxVisible = projectVisibleCounts[pNorm] ?? 8;
 										const visibleIdleSessions = idleSessions.slice(0, maxVisible);
 										const hasMore = !isCollapsed && idleSessions.length > maxVisible;
+
+										type ConvTreeGroup = { root: ConvRowItem; rows: ConvRowItem[] };
+										const convGroups: ConvTreeGroup[] = [];
+										for (const row of pRunningRows) {
+											if (row.depth === 0 || convGroups.length === 0) {
+												convGroups.push({ root: row, rows: [row] });
+											} else {
+												convGroups[convGroups.length - 1]!.rows.push(row);
+											}
+										}
+
+										type MergedProjectItem =
+											| {
+													kind: "conv";
+													group: ConvTreeGroup;
+													pinned: boolean;
+													topPriority: boolean;
+													sortTime: number;
+													displayTime?: number;
+											  }
+											| {
+													kind: "session";
+													session: SessionSummary;
+													pinned: boolean;
+													topPriority: boolean;
+													sortTime: number;
+											  };
+
+										const mergedProjectItems: MergedProjectItem[] = [];
+										for (const grp of convGroups) {
+											const rc = grp.root.c;
+											const matchedSess = findMatchingSession(rc);
+											const diskTime = matchedSess?.modified ?? 0;
+											const normF = rc.sessionFile ? normalizeSessionPathKey(rc.sessionFile) : "";
+											const activeTime = Math.max(
+												convActiveTimeRef.current.get(rc.id) ?? 0,
+												normF ? (convActiveTimeRef.current.get(normF) ?? 0) : 0,
+											);
+											const isStreamingNow = Boolean(rc.isStreaming || rc.completionPending || grp.root.hasStreaming);
+											const topPriority = !matchedSess || isStreamingNow || grp.root.hasKids;
+											const sortTime = topPriority
+												? Math.max(activeTime, diskTime, Date.now())
+												: Math.max(activeTime, diskTime);
+											const displayTime = diskTime > 0 || activeTime > 0 ? Math.max(activeTime, diskTime) : undefined;
+											mergedProjectItems.push({
+												kind: "conv",
+												group: grp,
+												pinned: Boolean(rc.pinned || matchedSess?.pinned),
+												topPriority,
+												sortTime,
+												displayTime,
+											});
+										}
+										if (!isCollapsed) {
+											for (const s of visibleIdleSessions) {
+												const sNorm = normalizeSessionPathKey(s.path);
+												const sortTime = Math.max(s.modified ?? 0, sNorm ? (convActiveTimeRef.current.get(sNorm) ?? 0) : 0);
+												mergedProjectItems.push({
+													kind: "session",
+													session: s,
+													pinned: Boolean(s.pinned),
+													topPriority: false,
+													sortTime,
+												});
+											}
+										}
+										mergedProjectItems.sort((a, b) => {
+											if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+											if (a.topPriority !== b.topPriority) return a.topPriority ? -1 : 1;
+											if (a.sortTime !== b.sortTime) return b.sortTime - a.sortTime;
+											return 0;
+										});
 
 										return (
 											<div className="lp-project-node" key={p.path}>
@@ -2667,11 +2809,18 @@ export const LeftPanel = memo(function LeftPanel({
 													? !isCollapsed
 													: (isCollapsed && (pRunningRows.length > 0 || hasUnread)) || !isCollapsed) && (
 													<div className="lp-project-tree-children">
-														{/* 1. 活动对话与完整子代理层级树（带折叠实心三角、深度缩进、子代理徽标） */}
-														{pRunningRows.map((row) => renderSingleConvRow(row, p.path))}
-
-														{/* 2. 静态历史记录（仅在项目展开态展示，不与上方活动会话重复） */}
-														{!isCollapsed && visibleIdleSessions.map((s) => renderHistorySessionRow(s, p.path))}
+														{/* 1 & 2. 统一按最后对话时间排序渲染（仅在实际对话/新建时置顶，纯点击查看保持原位） */}
+														{mergedProjectItems.flatMap((item) =>
+															item.kind === "conv"
+																? item.group.rows.map((row) =>
+																		renderSingleConvRow(
+																			row,
+																			p.path,
+																			row.depth === 0 ? item.displayTime : undefined,
+																		),
+																	)
+																: [renderHistorySessionRow(item.session, p.path)],
+														)}
 
 														{/* 3. 展开态且无任何会话时的空态/加载提示 */}
 														{!isCollapsed && pRunningRows.length === 0 && idleSessions.length === 0 && (

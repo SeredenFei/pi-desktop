@@ -146,6 +146,71 @@ export function asThinking(block: UiContentBlock): UiThinkingBlock | null {
 		: null;
 }
 
+/**
+ * 识别并拆分部分反代模型（如 Gemini 4 Argon / OpenAI 兼容网关）未通过 `thinking` 字段发送、
+ * 而是直接混入 `type: "text"` 正文开头的 `Thinking Process:` 或 `<think>...</think>` 思考过程。
+ */
+export function splitEmbeddedThinkingFromText(raw: string): { thinking: string; answer: string } | null {
+	if (!raw) return null;
+	const closedTag = raw.match(/^\s*<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/i);
+	if (closedTag) {
+		return { thinking: closedTag[1]!.trim(), answer: closedTag[2]!.trim() };
+	}
+	const openTag = raw.match(/^\s*<think>([\s\S]*)$/i);
+	if (openTag) {
+		return { thinking: openTag[1]!.trim(), answer: "" };
+	}
+
+	const headerMatch = raw.match(
+		/^\s*(?:#+\s*|\*{1,2}\s*)?(?:Thinking Process|Thinking|Thought Process|思考过程)\s*[:：]\*{0,2}[ \t]*\r?\n/i,
+	);
+	if (!headerMatch) return null;
+
+	const rest = raw.slice(headerMatch[0].length);
+	const lines = rest.split("\n");
+	const thinkLines: string[] = [];
+
+	for (let idx = 0; idx < lines.length; idx++) {
+		const line = lines[idx]!;
+		const stripped = line.trim();
+		if (!stripped) {
+			thinkLines.push(line);
+			continue;
+		}
+		const isListOrIndented = /^(?:\s{2,}|\t+|\d+\.\s+|[*+-]\s+|>+\s*)/.test(line);
+		if (!isListOrIndented) {
+			if (/[\u4e00-\u9fff]|^#{1,6}\s|^---+$/.test(stripped)) {
+				return {
+					thinking: thinkLines.join("\n").trim(),
+					answer: lines.slice(idx).join("\n").trim(),
+				};
+			}
+		}
+		const glued = line.match(/([.!?)`])\s*([\u4e00-\u9fff][^"]*)$/);
+		if (glued && glued.index !== undefined) {
+			const splitPos = glued.index + glued[1]!.length;
+			const prefix = line.slice(0, splitPos);
+			const doubleQuotes = (prefix.match(/"/g) ?? []).length;
+			const openParens = (prefix.match(/\(/g) ?? []).length;
+			const closeParens = (prefix.match(/\)/g) ?? []).length;
+			if (doubleQuotes % 2 === 0 && openParens <= closeParens) {
+				thinkLines.push(prefix);
+				const remFirst = line.slice(splitPos).trimStart();
+				return {
+					thinking: thinkLines.join("\n").trim(),
+					answer: [remFirst, ...lines.slice(idx + 1)].join("\n").trim(),
+				};
+			}
+		}
+		thinkLines.push(line);
+	}
+
+	return {
+		thinking: thinkLines.join("\n").trim(),
+		answer: "",
+	};
+}
+
 export function asToolCall(block: UiContentBlock): UiToolCallBlock | null {
 	return block.type === "toolCall" &&
 		typeof (block as UiToolCallBlock).id === "string" &&
@@ -2115,7 +2180,22 @@ function Block({
 	if (rawText) {
 		const cleanedText = role === "user" ? rawText.text : stripInlineMarkers(rawText.text, live);
 		if (!cleanedText.trim()) return null;
-		const text = cleanedText === rawText.text ? rawText : { ...rawText, text: cleanedText };
+		const embeddedThinking = role === "assistant" ? splitEmbeddedThinkingFromText(cleanedText) : null;
+		if (embeddedThinking && embeddedThinking.thinking) {
+			if (!embeddedThinking.answer) {
+				return (
+					<ThinkingBlock
+						thinking={embeddedThinking.thinking}
+						streaming={streaming && isLast && isTrailing}
+						wrap={thinkingWrap}
+						forceOpen={searchActive || forceThinking}
+					/>
+				);
+			}
+		}
+		const effectiveTextStr =
+			embeddedThinking && embeddedThinking.thinking ? embeddedThinking.answer : cleanedText;
+		const text = effectiveTextStr === rawText.text ? rawText : { ...rawText, text: effectiveTextStr };
 		// 单行消息：复制键不再用绝对定位压住文字，改成行内 flex 右键——与各 head
 		// 同样的 6px 间距、垂直居中、28px 尺寸。多行仍用右上浮层。
 		// showCopy=false：宿主在布局里隐藏了 host:msg-copy（那个条目的落点就是这里）。
@@ -2180,20 +2260,30 @@ function Block({
 			</button>
 		) : null;
 		return (
-			<div className={`msg-text${oneLiner ? " single" : ""}`}>
-				{oneLiner ? (
-					<>
-						<div className="msg-text-main">{body}</div>
-						{copyBtn}
-					</>
-				) : (
-					<>
-						{copyBtn}
-						{body}
-						{text.truncated && <div className="trunc-note">{t("truncated")}</div>}
-					</>
-				)}
-			</div>
+			<>
+				{embeddedThinking && embeddedThinking.thinking ? (
+					<ThinkingBlock
+						thinking={embeddedThinking.thinking}
+						streaming={false}
+						wrap={thinkingWrap}
+						forceOpen={searchActive || forceThinking}
+					/>
+				) : null}
+				<div className={`msg-text${oneLiner ? " single" : ""}`}>
+					{oneLiner ? (
+						<>
+							<div className="msg-text-main">{body}</div>
+							{copyBtn}
+						</>
+					) : (
+						<>
+							{copyBtn}
+							{body}
+							{text.truncated && <div className="trunc-note">{t("truncated")}</div>}
+						</>
+					)}
+				</div>
+			</>
 		);
 	}
 

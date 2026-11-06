@@ -14135,15 +14135,16 @@ export class ClientSession {
 
 	private async pushSessions(): Promise<void> {
 		if (!this.sessionsRequested) return;
+		const targetCwd = this.cwd;
 		try {
 			// Sessions live in the SDK default per-project dir
 			// (<agentDir>/sessions/--<cwd>--/), the same files the pi CLI/TUI
 			// use — one listing covers every conversation of the current folder.
-			const infos = await this.loadSessionInfos();
-			const sorted = this.buildSessionSummaries(this.cwd, infos);
-			this.emit({ type: "sessions", sessions: sorted });
+			const infos = await this.loadSessionInfos(targetCwd);
+			const sorted = this.buildSessionSummaries(targetCwd, infos);
+			this.emit({ type: "sessions", sessions: sorted, cwd: targetCwd });
 		} catch {
-			this.emit({ type: "sessions", sessions: [] });
+			this.emit({ type: "sessions", sessions: [], cwd: targetCwd });
 		}
 	}
 
@@ -16494,6 +16495,8 @@ export class ClientSession {
 			this.conv.promptedSinceActive = false;
 			this.conv.lastActiveAt = Date.now();
 			this.cwd = abs;
+			this.webUi.refresh();
+			this.flushSnapshot();
 			// 模型/key 恢复不挡快照：后台做，带切换代际 guard（用户又切走就跳过，
 			// 否则会把旧项目的 key 套到新对话上），做完补一次 flush 刷新模型栏。
 			{
@@ -16511,7 +16514,6 @@ export class ClientSession {
 				})();
 			}
 			this.applyCwdSideEffects(abs);
-			this.webUi.refresh();
 			this.emitConversations();
 			this.goalSvc.emitGoalStatus();
 			// Skills / prompt templates are project-bound — refresh the catalog.

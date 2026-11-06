@@ -52,5 +52,32 @@ describe("list_sessions dispatch and matching", () => {
 
 		// Different project should not match
 		expect(isSessionMatchingProject("C:/Users/c/.pi/agent/sessions/--e--other--/abc.jsonl", "E:/t")).toBe(false);
+
+		// POSIX home directory must NOT swallow child project sessions stored under ~/.pi/agent/sessions/--...--/
+		expect(
+			isSessionMatchingProject(
+				"/Users/sereden/.pi/agent/sessions/--Users-sereden--/2026-11-06.jsonl",
+				"/Users/sereden",
+			),
+		).toBe(true);
+		expect(
+			isSessionMatchingProject(
+				"/Users/sereden/.pi/agent/sessions/--Users-sereden-pi-desktop--/2026-11-06.jsonl",
+				"/Users/sereden",
+			),
+		).toBe(false);
+		expect(
+			isSessionMatchingProject(
+				"/Users/sereden/.pi/agent/sessions/--Users-sereden-pi-desktop--/2026-11-06.jsonl",
+				"/Users/sereden/pi-desktop",
+			),
+		).toBe(true);
+		// Paths with spaces (e.g. "Application Support" in macOS chat-space / chat-projects)
+		expect(
+			isSessionMatchingProject(
+				"/Users/sereden/.pi/agent/sessions/--Users-sereden-Library-Application Support-pi-web-ui-data-chat-space--/2026-11-06.jsonl",
+				"/Users/sereden/Library/Application Support/pi-web-ui/data/chat-space",
+			),
+		).toBe(true);
 	});
 });

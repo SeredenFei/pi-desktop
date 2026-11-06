@@ -824,4 +824,77 @@ describe("LeftPanel 会话行删除确认与重命名按钮互斥", () => {
 		expect(emptyTip).not.toBeNull();
 		expect(emptyTip!.textContent).toBeTruthy();
 	});
+
+	it("项目内对话按最后对话时间排序：纯点击选中查看旧对话不跳到顶上，真正开始对话（流式回复）时才移至最上方", () => {
+		setAppGlobals({ cwd: "/test/p1", ready: true, status: "open", workspaceRoots: [] });
+		const sessions = [
+			{
+				path: "/Users/u/.pi/agent/sessions/--test-p1--/s1.jsonl",
+				name: "最新对话S1",
+				firstMessage: "S1",
+				modified: 3000,
+				messageCount: 4,
+			},
+			{
+				path: "/Users/u/.pi/agent/sessions/--test-p1--/s2.jsonl",
+				name: "较早对话S2",
+				firstMessage: "S2",
+				modified: 2000,
+				messageCount: 3,
+			},
+			{
+				path: "/Users/u/.pi/agent/sessions/--test-p1--/s3.jsonl",
+				name: "最早对话S3",
+				firstMessage: "S3",
+				modified: 1000,
+				messageCount: 2,
+			},
+		];
+		// 用户选中打开了排在中间的 S2（已加载进 conversations，但未发生新对话 isStreaming=false）
+		const openedS2 = {
+			id: "conv-s2",
+			title: "较早对话S2",
+			cwd: "/test/p1",
+			sessionFile: "/Users/u/.pi/agent/sessions/--test-p1--/s2.jsonl",
+			messageCount: 3,
+			isStreaming: false,
+			isSubagent: false,
+		};
+		const { container } = mountLeftPanel({
+			projects: [{ path: "/test/p1", lastUsed: 3000 }],
+			sessions,
+			conversations: [openedS2],
+			activeConversationId: "conv-s2",
+			sessionFile: openedS2.sessionFile,
+		});
+
+		const getRowTitles = () =>
+			Array.from(container.querySelectorAll(".lp-project-tree-children .conv-title-text")).map((el) =>
+				el.textContent?.trim(),
+			);
+
+		// 纯选中查看 S2 时，仍保持 [S1, S2, S3] 的时间顺序，不跳到最上方
+		expect(getRowTitles()).toEqual(["最新对话S1", "较早对话S2", "最早对话S3"]);
+
+		// 当用户在 S2 中发送消息产生实际对话（isStreaming: true）时，S2 自动移到最上方 -> [S2, S1, S3]
+		act(() => {
+			root!.render(
+				createElement(
+					LanguageProvider,
+					null,
+					createElement(LeftPanel as any, {
+						active: true,
+						projects: [{ path: "/test/p1", lastUsed: 4000 }],
+						sessions,
+						conversations: [{ ...openedS2, isStreaming: true }],
+						elsewhere: [],
+						activeConversationId: "conv-s2",
+						sessionFile: openedS2.sessionFile,
+						panelSend: () => true,
+					}),
+				),
+			);
+		});
+		expect(getRowTitles()).toEqual(["较早对话S2", "最新对话S1", "最早对话S3"]);
+	});
 });
