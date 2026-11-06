@@ -8552,8 +8552,9 @@
 		position: sticky;
 		bottom: 0;
 		z-index: 1;
-		background: var(--bg-elev);
-		box-shadow: 0 -8px 12px -8px rgba(0, 0, 0, 0.75);
+		/* 保留 .primary 的强调色（曾被覆写成 --bg-elev 底 + 白字，浅色下文字直接看不见）；
+		   用与面板同色的上沿渐隐遮住滚动内容，而不是一条重黑阴影。 */
+		box-shadow: 0 -10px 10px -2px var(--bg-elev2);
 	}
 
 	.cwd-ssh-row {

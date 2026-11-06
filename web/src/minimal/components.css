@@ -595,6 +595,83 @@
 		line-height: 15px;
 	}
 
+	/* 远程 SSH 连接表单（portal 到 body，所以挂在 html[data-shell] 下）：
+	   base 是 11px 字 + 21px 高输入框 + 54px 标签列（「配置名称 (可选)」被挤成两行），
+	   放大到与其它弹窗一致的表单尺寸。 */
+	html[data-shell="minimal"] .cwd-ssh-form {
+		gap: 8px;
+		padding: 2px 2px 0;
+	}
+	html[data-shell="minimal"] .cwd-ssh-row {
+		gap: 8px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-row > label {
+		width: 96px;
+		font-size: 12px;
+		white-space: nowrap;
+		color: var(--text-dim);
+	}
+	html[data-shell="minimal"] :is(.cwd-ssh-input, .cwd-ssh-select) {
+		height: 30px;
+		padding: 0 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--inputbox-bg);
+		font-size: 12.5px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-select {
+		flex: 1;
+		min-width: 0;
+	}
+	html[data-shell="minimal"] :is(.cwd-ssh-input, .cwd-ssh-select):focus {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-soft);
+	}
+	html[data-shell="minimal"] .cwd-ssh-profiles-title {
+		font-size: 12px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-profile-card {
+		padding: 8px 10px;
+		border-color: var(--border-soft);
+		border-radius: var(--radius-sm);
+		background: var(--inputbox-bg);
+	}
+	html[data-shell="minimal"] .cwd-ssh-profile-name {
+		font-size: 12.5px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-profile-addr {
+		font-size: 11px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-form > .cwd-choose-btn.primary {
+		height: 34px;
+		margin-top: 6px;
+		border-radius: var(--radius-sm);
+		font-size: 13px;
+		font-weight: 600;
+	}
+	/* 连接后的环境探针卡片：同样从 10~11px 微缩字号放大 */
+	html[data-shell="minimal"] .cwd-ssh-probe-box {
+		gap: 8px;
+		padding: 10px 12px;
+		border-color: var(--border-soft);
+		border-radius: var(--radius-md);
+		background: var(--inputbox-bg);
+	}
+	html[data-shell="minimal"] .cwd-ssh-probe-header {
+		font-size: 12.5px;
+		color: var(--text);
+	}
+	html[data-shell="minimal"] .cwd-ssh-tool-badge {
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-size: 11px;
+	}
+	html[data-shell="minimal"] .cwd-ssh-install-box {
+		padding: 8px 10px;
+		border-radius: var(--radius-sm);
+		font-size: 12px;
+	}
+
 	/* 记忆与跨端同步弹窗 */
 	html[data-shell="minimal"] .modal.memory-modal {
 		max-width: 680px;

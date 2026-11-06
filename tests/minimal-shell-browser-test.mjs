@@ -286,6 +286,20 @@ async function main() {
 	check("点击「确认删除」后当前激活的 RL-Study 项目立即彻底移除且不复活", !afterDelNames.some((n) => n.includes("RL-Study")), afterDelNames);
 
 	console.log("9. 手机宽度");
+	await page.setViewportSize({ width: 1360, height: 860 });
+	await page.click('[data-testid="mtb-project"]');
+	await page.locator(".cwd-mode-tab", { hasText: "远程" }).first().click();
+	await page.locator(".cwd-ssh-form input[type=checkbox]").check();
+	const ssh = await page.evaluate(() => {
+		const btn = getComputedStyle(document.querySelector(".cwd-ssh-form > .cwd-choose-btn.primary"));
+		const labels = [...document.querySelectorAll(".cwd-ssh-row > label")].map((l) => l.getBoundingClientRect().height);
+		return { bg: btn.backgroundColor, color: btn.color, maxLabelH: Math.max(...labels) };
+	});
+	check("SSH「连接并探测环境」按钮使用强调色（不再浅底白字）", ssh.bg === "rgb(217, 119, 87)", ssh);
+	check("SSH 表单标签不换行", ssh.maxLabelH < 24, ssh);
+	await page.keyboard.press("Escape");
+	await page.mouse.click(700, 5);
+	await sleep(300);
 	await page.setViewportSize({ width: 390, height: 800 });
 	await sleep(500);
 	await page.click('[data-testid="mtb-sidebar"]');
