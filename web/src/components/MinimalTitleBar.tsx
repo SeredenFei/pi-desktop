@@ -27,6 +27,8 @@ export interface MinimalTitleBarProps {
 	/** 项目选择器开关（受控：命令面板的「打开项目」也要能打开它）。 */
 	projectPickerOpen: boolean;
 	onProjectPickerOpenChange: (open: boolean) => void;
+	/** 当前项目的自定义显示名（若已重命名则优先于目录 basename 显示）。 */
+	projectName?: string;
 }
 
 function basename(p: string): string {
@@ -55,6 +57,7 @@ export function MinimalTitleBar({
 	plugins,
 	projectPickerOpen,
 	onProjectPickerOpenChange,
+	projectName,
 }: MinimalTitleBarProps) {
 	const t = useT();
 	const cwd = useAppField("cwd");
@@ -116,7 +119,7 @@ export function MinimalTitleBar({
 					title={cwd || t("openProject")}
 					data-testid="mtb-project"
 				>
-					<span className="mtb-project-name">{cwd ? basename(cwd) : t("openProject")}</span>
+					<span className="mtb-project-name">{projectName || (cwd ? basename(cwd) : t("openProject"))}</span>
 					<FiChevronDown aria-hidden />
 				</button>
 			</div>

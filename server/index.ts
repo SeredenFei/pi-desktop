@@ -1042,7 +1042,7 @@ app.post("/api/memory/instructions", express.json({ limit: "64kb" }), (req, res)
 app.post("/api/memory/chat-project", express.json({ limit: "64kb" }), (req, res) => {
 	try {
 		const body = (req.body ?? {}) as {
-			op?: "create" | "delete";
+			op?: "create" | "delete" | "rename";
 			path?: string;
 			slug?: string;
 			name?: string;
@@ -1050,6 +1050,18 @@ app.post("/api/memory/chat-project", express.json({ limit: "64kb" }), (req, res)
 			sessionId?: string;
 			cwd?: string;
 		};
+		if (body.op === "rename") {
+			const target = String(body.path ?? body.cwd ?? "").trim();
+			const newName = String(body.name ?? "").trim();
+			if (!target || !newName) {
+				res.status(400).json({ error: "path and name are required" });
+				return;
+			}
+			memoryStore.renameProjectByCwd(target, newName);
+			const viewCwd = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : target;
+			res.json(buildMemoryResponse(viewCwd, body.sessionId));
+			return;
+		}
 		if (body.op === "delete") {
 			const target = String(body.path ?? "").trim();
 			if (target) {

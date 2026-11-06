@@ -477,6 +477,18 @@ export const LeftPanel = memo(function LeftPanel({
 
 	// 已乐观移除的项目（key -> 移除时间戳）：点击确认删除后 0ms 从列表消失；若后续重新打开/新建（lastUsed > removedAt）则自动放行
 	const [removedProjectAt, setRemovedProjectAt] = useState<Record<string, number>>({});
+	const [optimisticProjectNames, setOptimisticProjectNames] = useState<Record<string, string>>({});
+	const commitProjectRename = useCallback((projectPath: string, nextName: string) => {
+		const trimmed = nextName.trim();
+		if (!projectPath || !trimmed) return;
+		const norm = normalizeSessionPathKey(projectPath);
+		setOptimisticProjectNames((prev) => ({ ...prev, [norm]: trimmed }));
+		window.dispatchEvent(
+			new CustomEvent("pi-web-ui:project-renamed", {
+				detail: { path: projectPath, name: trimmed },
+			}),
+		);
+	}, []);
 
 	// 1. 物理级去重：按 normalizeSessionPathKey 确保每个项目唯一，杜绝重复项
 	const deduplicatedProjects = useMemo(() => {
@@ -2313,7 +2325,9 @@ export const LeftPanel = memo(function LeftPanel({
 										const switching =
 											transition?.kind === "cwd" && normalizeSessionPathKey(transition.target) === pNorm;
 										const sbx = p.sandbox;
-										const dispName = sbx ? sbx.name : projectName(p.path);
+										const customName = (p as ProjectSummary & { name?: string }).name;
+										const dispName =
+											optimisticProjectNames[pNorm] || customName || (sbx ? sbx.name : projectName(p.path));
 
 										// 1. 归属于该项目的全部活动对话（含主会话与完整子代理树，支持展开/折叠与缩进）
 										const pRunningRaw = runningAll.filter((c) => normalizeSessionPathKey(c.cwd) === pNorm);
@@ -2388,7 +2402,7 @@ export const LeftPanel = memo(function LeftPanel({
 														}
 														disabled={switching}
 														onClick={() => {
-															if (switching) return;
+															if (switching || renaming === `proj:${p.path}`) return;
 															if (singleProjectFocus) {
 																// 单项目聚焦：已展开时再次点击直接收起；点击另一个项目时自动收起上一个项目并展开当前项目
 																if (isExpanded) {
@@ -2416,7 +2430,7 @@ export const LeftPanel = memo(function LeftPanel({
 														}}
 														onDoubleClick={(e) => {
 															e.stopPropagation();
-															if (switching) return;
+															if (switching || renaming === `proj:${p.path}`) return;
 															if (singleProjectFocus) {
 																// 双击同样互斥展开该项目（自动收起其他项目）
 																setFocusedProjectNorm(pNorm);
@@ -2488,9 +2502,44 @@ export const LeftPanel = memo(function LeftPanel({
 														) : sbx ? (
 															<LuFlaskConical className="project-icon sandbox-icon" />
 														) : null}
-														<span className="lp-project-name" title={dispName}>
-															{dispName}
-														</span>
+														{renaming === `proj:${p.path}` ? (
+															<input
+																autoFocus
+																data-testid="project-rename-input"
+																className="session-rename-input"
+																value={renameDraft}
+																placeholder={dispName}
+																onClick={(e) => e.stopPropagation()}
+																onDoubleClick={(e) => e.stopPropagation()}
+																onChange={(e) => setRenameDraft(e.target.value)}
+																onKeyDown={(e) => {
+																	e.stopPropagation();
+																	if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+																		e.preventDefault();
+																		const nextName = renameDraft.trim();
+																		if (nextName && nextName !== dispName) {
+																			commitProjectRename(p.path, nextName);
+																		}
+																		setRenaming(null);
+																	} else if (e.key === "Escape") {
+																		e.preventDefault();
+																		setRenaming(null);
+																	}
+																}}
+																onKeyUp={(e) => e.stopPropagation()}
+																onBlur={() => {
+																	const nextName = renameDraft.trim();
+																	if (nextName && nextName !== dispName) {
+																		commitProjectRename(p.path, nextName);
+																	}
+																	setRenaming(null);
+																}}
+															/>
+														) : (
+															<span className="lp-project-name" title={dispName}>
+																{dispName}
+															</span>
+														)}
 														{sbx && (
 															<span className={`lp-sandbox-badge ${sbx.ephemeral ? "ephemeral" : "permanent"}`}>
 																{sbx.ephemeral ? t("sandboxBadgeEphemeral") : t("sandboxBadgePermanent")}
@@ -2527,6 +2576,22 @@ export const LeftPanel = memo(function LeftPanel({
 														>
 															<FiPlus />
 														</button>
+														{!p.path.replace(/\\/g, "/").endsWith("/chat-space") && (
+															<button
+																type="button"
+																data-testid={`rename-project-${dispName}`}
+																className="lp-project-btn lp-project-rename-btn"
+																title="重命名项目"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setConfirmDel(null);
+																	setRenameDraft(dispName);
+																	setRenaming(`proj:${p.path}`);
+																}}
+															>
+																<FiEdit2 />
+															</button>
+														)}
 														{!p.path.replace(/\\/g, "/").endsWith("/chat-space") && (
 															<button
 																type="button"

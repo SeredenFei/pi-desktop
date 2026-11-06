@@ -50,6 +50,8 @@ export interface ProjectMemoryBucket {
 	isChatProject?: boolean;
 	/** 话题项目的 slug（用于跨端自动恢复本地虚拟目录）。 */
 	slug?: string;
+	/** 本地/远程工作区目录名（小写，用于在侧栏列表中按路径快速匹配自定义项目名称）。 */
+	folderName?: string;
 	/** 软删除墓碑时间戳：删除项目后跨端合并时防止被旧副本复活。 */
 	deletedAt?: number;
 	updatedAt: number;
@@ -119,6 +121,8 @@ export interface MemorySnapshotView {
 		itemCount: number;
 		updatedAt: number;
 	}[];
+	/** 自定义项目显示名映射（按 projectKey / dir:<folderLower> / slug:<slugLower> 索引）。 */
+	projectNames: Record<string, string>;
 	syncedTranscripts: SyncedTranscriptSummary[];
 }
 
@@ -450,6 +454,9 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 				instructionsUpdatedAt: Math.max(aInstAt, bInstAt),
 				...(a.isChatProject || b.isChatProject ? { isChatProject: true } : {}),
 				...(newerMeta.slug || a.slug || b.slug ? { slug: newerMeta.slug || a.slug || b.slug } : {}),
+				...(newerMeta.folderName || a.folderName || b.folderName
+					? { folderName: newerMeta.folderName || a.folderName || b.folderName }
+					: {}),
 				...(isDeleted ? { deletedAt: maxDel } : {}),
 				updatedAt: Math.max(maxUpd, maxDel),
 				items: isDeleted ? [] : mergeMemoryItems(a.items ?? [], b.items ?? []),
@@ -1009,6 +1016,36 @@ export class MemoryStore {
 	}
 
 	/**
+	 * 重命名指定路径对应的项目（支持 Chat 话题项目与 Work 本地/远程项目，自动更新时间戳以参与跨端同步）。
+	 */
+	renameProjectByCwd(cwd: string, newName: string): { projectKey: string; name: string } | null {
+		this.syncFromDiskIfNewer();
+		const trimmedName = clampText(newName, 80);
+		if (!cwd || !trimmedName) return null;
+		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
+		if (id.isChatSpace) return null;
+		const now = Date.now();
+		const folderLower = (basename(resolve(cwd)) || "").toLowerCase();
+		const existing = this.doc.projects[id.projectKey];
+		this.doc.projects[id.projectKey] = {
+			projectKey: id.projectKey,
+			name: trimmedName,
+			...(existing?.instructions ? { instructions: existing.instructions } : {}),
+			...(existing?.instructionsUpdatedAt ? { instructionsUpdatedAt: existing.instructionsUpdatedAt } : {}),
+			...(existing?.isChatProject || id.chatProjectSlug
+				? { isChatProject: true, slug: existing?.slug || id.chatProjectSlug }
+				: {}),
+			...(folderLower ? { folderName: folderLower } : {}),
+			updatedAt: now,
+			items: existing?.deletedAt ? [] : (existing?.items ?? []),
+		};
+		this.doc.updatedAt = now;
+		this.saveToDisk();
+		this.notifyChange();
+		return { projectKey: id.projectKey, name: trimmedName };
+	}
+
+	/**
 	 * 删除指定路径对应的项目（若为 Chat 话题项目，同步写入墓碑、移除云端对话记录并清理本地 chat-projects/<slug> 目录）。
 	 */
 	deleteProjectByCwd(cwd: string): boolean {
@@ -1296,6 +1333,17 @@ export class MemoryStore {
 		const workProjectsRoot = resolveWorkProjectsRoot(this.dataDir);
 		const id = resolveProjectMemoryIdentity(this.dataDir, cwd);
 		const bucket = this.doc.projects[id.projectKey];
+		const projectNames: Record<string, string> = {};
+		for (const b of Object.values(this.doc.projects)) {
+			if (!b || b.deletedAt || !b.name) continue;
+			projectNames[b.projectKey.toLowerCase()] = b.name;
+			if (b.slug) {
+				projectNames[`slug:${b.slug.toLowerCase()}`] = b.name;
+			}
+			if (b.folderName) {
+				projectNames[`dir:${b.folderName.toLowerCase()}`] = b.name;
+			}
+		}
 		return {
 			chatSpaceCwd,
 			chatProjectsRoot,
@@ -1307,6 +1355,7 @@ export class MemoryStore {
 			globalItems: this.listActiveItems("global"),
 			projectItems: this.listActiveItems("project", cwd),
 			chatProjects: this.listChatProjects(),
+			projectNames,
 			syncedTranscripts: this.listSyncedTranscripts(),
 		};
 	}

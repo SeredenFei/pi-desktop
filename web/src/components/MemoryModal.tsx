@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	FiArrowUp,
 	FiBriefcase,
@@ -59,6 +59,7 @@ export interface MemorySnapshotView {
 	globalItems: MemoryItem[];
 	projectItems: MemoryItem[];
 	chatProjects: ChatProjectEntry[];
+	projectNames?: Record<string, string>;
 	syncedTranscripts?: SyncedTranscriptSummary[];
 }
 
@@ -202,6 +203,26 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 		[cwd, sessionId],
 	);
 
+	const renameProject = useCallback(
+		async (path: string, name: string) => {
+			const trimmed = name.trim();
+			if (!path || !trimmed) return;
+			try {
+				const res = await apiPostMemory("/api/memory/chat-project", {
+					op: "rename",
+					path,
+					name: trimmed,
+					cwd,
+					sessionId,
+				});
+				setState(res);
+			} catch {
+				/* ignore */
+			}
+		},
+		[cwd, sessionId],
+	);
+
 	return {
 		memory: state,
 		setMemory: setState,
@@ -209,6 +230,7 @@ export function useMemoryState(cwd: string, sessionId: string, open: boolean) {
 		toggleIsolated,
 		createChatProject,
 		deleteChatProject,
+		renameProject,
 	};
 }
 
@@ -236,6 +258,8 @@ export function ChatSpaceHeader({
 	const zh = isZhLocale(locale);
 	const [creatingProj, setCreatingProj] = useState(false);
 	const [projName, setProjName] = useState("");
+	const newProjRowRef = useRef<HTMLDivElement>(null);
+	const newProjBtnRef = useRef<HTMLButtonElement>(null);
 
 	useEffect(() => {
 		const onOpenNew = () => {
@@ -245,6 +269,22 @@ export function ChatSpaceHeader({
 		window.addEventListener("pi-web-ui:open-new-chat-project", onOpenNew);
 		return () => window.removeEventListener("pi-web-ui:open-new-chat-project", onOpenNew);
 	}, [onModeChange]);
+
+	// 点击输入框与触发按钮以外的任意位置时，自动收回新建项目输入框
+	useEffect(() => {
+		if (!creatingProj) return;
+		const onPointerDown = (e: MouseEvent) => {
+			const target = e.target as HTMLElement | null;
+			if (!target) return;
+			if (newProjRowRef.current?.contains(target)) return;
+			if (newProjBtnRef.current?.contains(target)) return;
+			if (target.closest(".lp-project-action")) return;
+			setCreatingProj(false);
+			setProjName("");
+		};
+		document.addEventListener("mousedown", onPointerDown, true);
+		return () => document.removeEventListener("mousedown", onPointerDown, true);
+	}, [creatingProj]);
 
 	const submitNewProj = () => {
 		const trimmed = projName.trim();
@@ -306,6 +346,7 @@ export function ChatSpaceHeader({
 							<FiPlus />
 						</button>
 						<button
+							ref={newProjBtnRef}
 							type="button"
 							className="cs-space-add"
 							onClick={() => setCreatingProj((v) => !v)}
@@ -316,7 +357,7 @@ export function ChatSpaceHeader({
 						</button>
 					</div>
 					{creatingProj && (
-						<div className="cs-new-proj-row">
+						<div className="cs-new-proj-row" ref={newProjRowRef}>
 							<input
 								type="text"
 								className="cs-new-proj-input"
@@ -326,7 +367,10 @@ export function ChatSpaceHeader({
 								onChange={(e) => setProjName(e.target.value)}
 								onKeyDown={(e) => {
 									if (e.key === "Enter") submitNewProj();
-									else if (e.key === "Escape") setCreatingProj(false);
+									else if (e.key === "Escape") {
+										setCreatingProj(false);
+										setProjName("");
+									}
 								}}
 								data-testid="new-chat-project-input"
 							/>

@@ -555,11 +555,8 @@ export function App() {
 		}
 	}, []);
 	const activeSessionKey = chat.state?.sessionId || chat.activeConversationId || chat.state?.conversationId || "";
-	const { memory, setMemory, refreshMemory, toggleIsolated, createChatProject, deleteChatProject } = useMemoryState(
-		cwd,
-		activeSessionKey,
-		memoryModalOpen,
-	);
+	const { memory, setMemory, refreshMemory, toggleIsolated, createChatProject, deleteChatProject, renameProject } =
+		useMemoryState(cwd, activeSessionKey, memoryModalOpen);
 	const prevStreamingRef = useRef<boolean>(false);
 	useEffect(() => {
 		const isStr = Boolean(chat.state?.isStreaming);
@@ -2780,29 +2777,73 @@ export function App() {
 		return () => window.removeEventListener("pi-web-ui:project-removed", onProjectRemoved);
 	}, [isChatPath, deleteChatProject, refreshMemory]);
 
+	// 监听侧边栏重命名项目事件：同步写入 MemoryStore 并刷新项目显示名
+	useEffect(() => {
+		const onProjectRenamed = (ev: Event) => {
+			const detail = (ev as CustomEvent<{ path?: string; name?: string }>).detail;
+			if (detail?.path && detail?.name) {
+				void renameProject(detail.path, detail.name);
+			}
+		};
+		window.addEventListener("pi-web-ui:project-renamed", onProjectRenamed);
+		return () => window.removeEventListener("pi-web-ui:project-renamed", onProjectRenamed);
+	}, [renameProject]);
+
+	const resolveCustomProjectName = useCallback(
+		(pPath: string): string | undefined => {
+			if (!pPath) return undefined;
+			const clean = pPath.replace(/\\/g, "/").replace(/\/+$/, "");
+			const base = (clean.split("/").pop() || "").toLowerCase();
+			if (!base) return undefined;
+			if (base === "chat-space") return "💬 独立对话";
+			const pNorm = normModePath(pPath);
+			for (const cp of memory.view?.chatProjects ?? []) {
+				if (normModePath(cp.path) === pNorm || cp.slug.toLowerCase() === base) {
+					return cp.name;
+				}
+			}
+			const map = memory.view?.projectNames;
+			if (!map) return undefined;
+			return map[`dir:${base}`] || map[`slug:${base}`] || map[`chat-project:${base}`];
+		},
+		[memory.view?.chatProjects, memory.view?.projectNames, normModePath],
+	);
+
 	const sidebarProjects = useMemo(() => {
 		if (!minimal) return chat.projects;
 		if (sidebarMode === "chat") {
 			if (memory.view) {
-				const byNorm = new Map<string, (typeof chat.projects)[number]>();
+				const byNorm = new Map<string, (typeof chat.projects)[number] & { name?: string }>();
 				if (memory.view.chatSpaceCwd) {
 					byNorm.set(normModePath(memory.view.chatSpaceCwd), {
 						path: memory.view.chatSpaceCwd,
+						name: "💬 独立对话",
 						lastUsed: Date.now() + 1,
 					});
 				}
 				for (const cp of memory.view.chatProjects ?? []) {
 					byNorm.set(normModePath(cp.path), {
 						path: cp.path,
+						name: cp.name,
 						lastUsed: cp.updatedAt || Date.now(),
 					});
 				}
 				return [...byNorm.values()];
 			}
-			return chat.projects.filter((p) => isChatPath(p.path));
+			return chat.projects
+				.filter((p) => isChatPath(p.path))
+				.map((p) => {
+					const custom = resolveCustomProjectName(p.path);
+					return custom ? { ...p, name: custom } : p;
+				});
 		}
-		return chat.projects.filter((p) => !isChatPath(p.path));
-	}, [minimal, sidebarMode, chat.projects, memory.view, normModePath, isChatPath]);
+		return chat.projects
+			.filter((p) => !isChatPath(p.path))
+			.map((p) => {
+				const custom = resolveCustomProjectName(p.path);
+				return custom ? { ...p, name: custom } : p;
+			});
+	}, [minimal, sidebarMode, chat.projects, memory.view, normModePath, isChatPath, resolveCustomProjectName]);
 
 	const sidebarConversations = useMemo(() => {
 		if (!minimal) return chat.conversations;
@@ -3018,6 +3059,7 @@ export function App() {
 					plugins={enabledPlugins}
 					projectPickerOpen={projectPickerOpen}
 					onProjectPickerOpenChange={setProjectPickerOpen}
+					projectName={resolveCustomProjectName(cwd) || memory.view?.projectName}
 				/>
 			) : (
 				<TopBar

@@ -287,9 +287,19 @@ async function main() {
 	await page.keyboard.press("Escape");
 	await sleep(200);
 
-	console.log("8.6. Chat / Work 双模式物理隔离、直觉化新建与一键删除项目验证");
+	console.log("8.6. Chat / Work 双模式物理隔离、直觉化新建、外部点击收回、改名与一键删除项目验证");
 	await page.click('[data-testid="mode-tab-chat"]');
 	await sleep(300);
+	// 验证：点击新建项目按钮弹出输入框后，点击页面其他地方自动收回输入框
+	await page.click('[data-testid="new-chat-project-btn"]');
+	await page.waitForSelector('[data-testid="new-chat-project-input"]', { timeout: 3000 });
+	await page.click(".inputbox textarea");
+	await sleep(200);
+	check(
+		"点击新建项目后点其他地方自动收回输入框",
+		(await page.locator('[data-testid="new-chat-project-input"]').count()) === 0,
+	);
+
 	// 在 Chat 模式下点击「项目」标题栏右侧的 + 按钮，应直接弹出新建 Chat 项目输入框（而不是本地目录选择器）
 	await page.click(".lp-project-action");
 	await page.waitForSelector('[data-testid="new-chat-project-input"]', { timeout: 3000 });
@@ -297,30 +307,51 @@ async function main() {
 	await page.fill('[data-testid="new-chat-project-input"]', "RL-Study");
 	await page.keyboard.press("Enter");
 	await sleep(500);
-	const chatProjNames = await page.locator(".lp-project-name"). allTextContents();
+	const chatProjNames = await page.locator(".lp-project-name").allTextContents();
 	check("新建 Chat 项目 RL-Study 立即出现在 Chat 列表", chatProjNames.some((n) => n.includes("RL-Study")), chatProjNames);
 
-	// 切换到 Work 模式，验证 RL-Study 与 💬 独立对话 绝不串台到 Work 列表
+	// 验证：项目支持内联改名，改名后侧栏与顶栏同步更新
+	await page.click('[data-testid="rename-project-RL-Study"]');
+	await page.waitForSelector('[data-testid="project-rename-input"]', { timeout: 3000 });
+	await page.fill('[data-testid="project-rename-input"]', "RL-Navigation");
+	await page.keyboard.press("Enter");
+	await sleep(500);
+	const renamedProjNames = await page.locator(".lp-project-name").allTextContents();
+	check(
+		"项目内联改名后立即生效（RL-Study -> RL-Navigation）",
+		renamedProjNames.some((n) => n.includes("RL-Navigation")) && !renamedProjNames.some((n) => n.includes("RL-Study")),
+		renamedProjNames,
+	);
+	check(
+		"顶栏项目名同步更新为 RL-Navigation",
+		(await page.locator(".mtb-project-name").textContent())?.includes("RL-Navigation"),
+	);
+
+	// 切换到 Work 模式，验证 RL-Navigation 与 💬 独立对话 绝不串台到 Work 列表
 	await page.click('[data-testid="mode-tab-work"]');
 	await sleep(400);
 	const workProjNames = await page.locator(".lp-project-name").allTextContents();
 	check(
 		"切换到 Work 模式后，Chat 项目与独立对话绝不串台出现",
-		!workProjNames.some((n) => n.includes("RL-Study") || n.includes("独立对话")),
+		!workProjNames.some((n) => n.includes("RL-Navigation") || n.includes("独立对话")),
 		workProjNames,
 	);
 
-	// 切回 Chat 模式，验证删除当前正在打开的 RL-Study 项目能够立即删除且不复活
+	// 切回 Chat 模式，验证删除当前正在打开的 RL-Navigation 项目能够立即删除且不复活
 	await page.click('[data-testid="mode-tab-chat"]');
 	await sleep(400);
-	const delBtn = page.locator('[data-testid="delete-project-RL-Study"]');
+	const delBtn = page.locator('[data-testid="delete-project-RL-Navigation"]');
 	await delBtn.click();
 	await sleep(150);
 	check("第一次点击垃圾桶出现醒目的「确认删除」按钮", (await delBtn.textContent())?.includes("确认删除"));
 	await delBtn.click();
 	await sleep(500);
 	const afterDelNames = await page.locator(".lp-project-name").allTextContents();
-	check("点击「确认删除」后当前激活的 RL-Study 项目立即彻底移除且不复活", !afterDelNames.some((n) => n.includes("RL-Study")), afterDelNames);
+	check(
+		"点击「确认删除」后当前激活的 RL-Navigation 项目立即彻底移除且不复活",
+		!afterDelNames.some((n) => n.includes("RL-Navigation")),
+		afterDelNames,
+	);
 
 	console.log("9. 手机宽度");
 	await page.setViewportSize({ width: 1360, height: 860 });
