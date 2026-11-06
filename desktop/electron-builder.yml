@@ -33,7 +33,7 @@ npmRebuild: false
 publish:
   provider: github
   owner: feifeifei527
-  repo: pi-web-ui
+  repo: pi-desktop
 win:
   target:
     - nsis

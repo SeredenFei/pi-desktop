@@ -8,7 +8,7 @@
 
 **English** · [简体中文](./README.zh-CN.md)
 
-[Latest Release & Installers](https://github.com/feifeifei527/pi-web-ui/releases/latest) · [Design Plan](./docs/redesign-plan.md) · [Architecture](./docs/architecture-core.md)
+[Latest Release & Installers](https://github.com/feifeifei527/pi-desktop/releases/latest) · [Design Plan](./docs/redesign-plan.md) · [Architecture](./docs/architecture-core.md)
 
 [![Node version](https://img.shields.io/node/v/pi-web-ui)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -58,7 +58,7 @@
 
 ### Option 1: Prebuilt Desktop App (Windows / macOS / Ubuntu)
 
-Download the installer for your platform from [**GitHub Releases**](https://github.com/feifeifei527/pi-web-ui/releases/latest):
+Download the installer for your platform from [**GitHub Releases**](https://github.com/feifeifei527/pi-desktop/releases/latest):
 
 | Platform           | Package                                      | Notes                                                                                                                                                           |
 | ------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -71,8 +71,8 @@ Download the installer for your platform from [**GitHub Releases**](https://gith
 Requires **Node.js >= 22.19.0**.
 
 ```bash
-git clone https://github.com/feifeifei527/pi-web-ui.git
-cd pi-web-ui
+git clone https://github.com/feifeifei527/pi-desktop.git
+cd pi-desktop
 npm ci
 
 # Build web + server + desktop shell

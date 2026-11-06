@@ -8,7 +8,7 @@
 
 [English](./README.md) · **简体中文**
 
-[下载安装包 (Releases)](https://github.com/feifeifei527/pi-web-ui/releases/latest) · [重构方案说明](./docs/redesign-plan.md) · [核心架构文档](./docs/architecture-core.md)
+[下载安装包 (Releases)](https://github.com/feifeifei527/pi-desktop/releases/latest) · [重构方案说明](./docs/redesign-plan.md) · [核心架构文档](./docs/architecture-core.md)
 
 [![Node version](https://img.shields.io/node/v/pi-web-ui)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -66,7 +66,7 @@
 
 ### 方式一：直接下载桌面安装包（内置运行时，开箱即用）
 
-前往 [**GitHub Releases**](https://github.com/feifeifei527/pi-web-ui/releases/latest) 下载对应系统的安装包：
+前往 [**GitHub Releases**](https://github.com/feifeifei527/pi-desktop/releases/latest) 下载对应系统的安装包：
 
 | 系统               | 安装包                                    | 说明                                                                                                                                                                       |
 | ------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,8 +79,8 @@
 环境要求：**Node.js >= 22.19.0**。
 
 ```bash
-git clone https://github.com/feifeifei527/pi-web-ui.git
-cd pi-web-ui
+git clone https://github.com/feifeifei527/pi-desktop.git
+cd pi-desktop
 npm ci
 
 # 编译前端、服务端与桌面外壳
