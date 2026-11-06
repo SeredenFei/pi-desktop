@@ -13,11 +13,23 @@
 [![Node version](https://img.shields.io/node/v/pi-web-ui)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
+<br />
+
+<img src="./assets/screenshots/hero-light.png" width="100%" alt="PI Minimalist Light Workspace — Claude + Codex Hybrid UI" />
+
 </div>
 
 ---
 
 **PI** is a deep redesign and feature evolution built on top of [`xing-shuyin/pi-web-ui`](https://github.com/xing-shuyin/pi-web-ui) (powered by the `@earendil-works/pi-coding-agent` SDK). While preserving the full power of multi-engine coding agents, integrated PTY terminals, Git workflows, Canvas pipelines, and plugins, **PI** reimagines the experience as a clean, single-instance desktop application inspired by **Claude Desktop** and **OpenAI Codex**.
+
+## 🖼️ Interface Preview
+
+| Warm Light · Coding & Chat Canvas | Warm Dark · Terminal Dock & File Drawer |
+| :---: | :---: |
+| <img src="./assets/screenshots/hero-light.png" width="100%" alt="Warm Light Workspace" /> | <img src="./assets/screenshots/hero-dark-terminal.png" width="100%" alt="Warm Dark Workspace with Terminal Dock" /> |
+| **Two-Tier Memory & GitHub Cloud Sync** | **Unified Command Palette (`Ctrl/Cmd + K`)** |
+| <img src="./assets/screenshots/memory-sync.png" width="100%" alt="Memory and Cloud Sync Modal" /> | <img src="./assets/screenshots/command-palette.png" width="100%" alt="Command Palette" /> |
 
 ---
 

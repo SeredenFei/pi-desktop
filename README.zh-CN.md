@@ -13,11 +13,23 @@
 [![Node version](https://img.shields.io/node/v/pi-web-ui)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
+<br />
+
+<img src="./assets/screenshots/hero-light.png" width="100%" alt="PI 极简暖白工作台 — Claude + Codex 混合排版" />
+
 </div>
 
 ---
 
 **PI** 基于开源项目 [`xing-shuyin/pi-web-ui`](https://github.com/xing-shuyin/pi-web-ui)（`@earendil-works/pi-coding-agent` SDK）深度重构与扩展而来。在完整保留多引擎编码智能体、内置 PTY 终端、Git 工作流、画布流水线（Canvas）与插件生态的基础上，**PI** 将交互与视觉重塑为融合 **Claude Desktop** 与 **OpenAI Codex** 风格的极简原生级桌面软件，并新增了**独立对话空间、全局/项目分级记忆、单会话无痕隔离以及 GitHub 跨端云同步**。
+
+## 🖼️ 界面预览 (UI Showcase)
+
+| 暖调浅色 · 极简编码与对话画布 (`#FAF9F5`) | 暖调深色 · 底部终端与文件抽屉 (`#262624`) |
+| :---: | :---: |
+| <img src="./assets/screenshots/hero-light.png" width="100%" alt="暖调浅色工作台" /> | <img src="./assets/screenshots/hero-dark-terminal.png" width="100%" alt="暖调深色工作台与底部终端" /> |
+| **全局/项目分级记忆与 GitHub 跨端同步** | **`Ctrl/Cmd + K` 全能命令面板与全局搜索** |
+| <img src="./assets/screenshots/memory-sync.png" width="100%" alt="记忆与跨端同步弹窗" /> | <img src="./assets/screenshots/command-palette.png" width="100%" alt="命令面板" /> |
 
 ---
 
