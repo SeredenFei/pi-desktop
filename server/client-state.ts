@@ -15,6 +15,7 @@ import { normalizeSoftCapByModel, normalizeSoftCapTokens } from "./soft-cap.js";
 import { deriveLegacy, legacyToDisabled, normalizeDisabledAgentTools } from "./tool-manager.js";
 import { normalizeToolPromptOverrides, type ToolPromptOverrideMap } from "./tool-prompt-overrides.js";
 import { UI_SLOTS } from "./plugin-ui-slots.js";
+import { restoreWorkspaceUriFromSessionDir } from "./remote-ssh-service.js";
 import { normalizeTerminalShell } from "./terminal-shell.js";
 import { DEFAULT_PROMPT_DISABLED } from "./prompt-composer.js";
 import type { EngineId, QueueMode, UiAlign, UiLayoutPrefs, UiSlotId } from "./protocol.js";
@@ -957,6 +958,7 @@ export class ClientStateStore {
 
 	/** Remember which workspace a client last used; bumps its project entry. */
 	remember(clientId: string, cwd: string): void {
+		cwd = restoreWorkspaceUriFromSessionDir(cwd);
 		const all = this.load();
 		const state = (all[clientId] ??= { projects: [] });
 		this.touchClient(all, clientId);
@@ -1052,11 +1054,12 @@ export class ClientStateStore {
 			if (!list) return;
 			for (const p of list) {
 				if (!p?.path) continue;
-				const key = normalizePathKey(p.path);
+				const restoredPath = restoreWorkspaceUriFromSessionDir(p.path);
+				const key = normalizePathKey(restoredPath);
 				if (removedKeys.has(key)) continue;
 				const existing = map.get(key);
 				if (!existing || p.lastUsed > existing.lastUsed) {
-					map.set(key, { path: p.path, lastUsed: p.lastUsed });
+					map.set(key, { path: restoredPath, lastUsed: p.lastUsed });
 				}
 			}
 		};

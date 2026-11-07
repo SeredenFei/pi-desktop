@@ -12,7 +12,7 @@ import type { DispatchSession } from "./index.js";
 import { SchedulerValidationError, type SchedulerStore } from "./scheduler-tasks.js";
 import type { RemoteSshService } from "./remote-ssh-service.js";
 import { normalizePathKey } from "./client-state.js";
-import { listAvailableShells, pickUserShell, systemShellDeps } from "./terminal-shell.js";
+import { listAvailableShells, listAvailableSshHosts, pickUserShell, systemShellDeps } from "./terminal-shell.js";
 
 /** 文件与工作区相关操作 */
 export function handleFileMessage(msg: ClientMessage, cs: DispatchSession): boolean {
@@ -419,9 +419,11 @@ export function handleTerminalMessage(
 		case "list_terminal_shells": {
 			// "auto" = what an empty setting resolves to right now (PI_WEB_SHELL > login shell > $SHELL > bash).
 			const autoShell = pickUserShell("", systemShellDeps()).shell;
-			const reply = (shells: Array<{ path: string; label: string }>) =>
-				send?.({ type: "terminal_shells", shells, autoShell });
-			void listAvailableShells().then(reply, () => reply([]));
+			void Promise.all([listAvailableShells().catch(() => []), listAvailableSshHosts().catch(() => [])]).then(
+				([shells, sshHosts]) => {
+					send?.({ type: "terminal_shells", shells, autoShell, sshHosts });
+				},
+			);
 			return true;
 		}
 		case "terminal_input": {

@@ -11,7 +11,9 @@
 import { existsSync } from "node:fs";
 import { access, constants, readFile, realpath } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
-import { posix, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
+import { formatRemoteWorkspaceUri, getGlobalRemoteSshService } from "./remote-ssh-service.js";
+import type { RemoteSshProfileSummary } from "./protocol.js";
 
 export interface ShellChoice {
 	shell: string;
@@ -22,6 +24,13 @@ export interface ShellChoice {
 export interface ShellOption {
 	path: string;
 	label: string;
+}
+
+/** 面向新建终端下拉菜单的可选远程 SSH 主机。 */
+export interface SshHostOption {
+	label: string;
+	uri: string;
+	source: "profile" | "ssh_config";
 }
 
 /** 解析器的外部依赖——全部可注入，单测不碰真实磁盘/系统。 */
@@ -283,4 +292,131 @@ export function normalizeTerminalShell(v: unknown): string {
 	const s = v.trim();
 	if (!s || s.length > 1024 || /[\0\r\n]/.test(s)) return "";
 	return s;
+}
+
+function defaultSystemUsername(): string {
+	try {
+		const u = userInfo().username?.trim();
+		if (u) return u;
+	} catch {
+		/* ignore */
+	}
+	return process.env.USER?.trim() || process.env.USERNAME?.trim() || "root";
+}
+
+/**
+ * 解析 `~/.ssh/config` 文本中的非通配 Host 条目（纯函数，无磁盘/子进程调用）。
+ * 提取 Host 别名、HostName、User（缺省用 defaultUser）、Port（缺省 22），生成 `ssh://user@host:port/~`。
+ */
+export function parseSshConfigHosts(content: string, defaultUser = defaultSystemUsername()): SshHostOption[] {
+	const out: SshHostOption[] = [];
+	const seenUris = new Set<string>();
+	let currentAliases: string[] = [];
+	let hostName = "";
+	let user = "";
+	let port = 22;
+
+	const flush = () => {
+		if (currentAliases.length === 0) return;
+		const effUser = (user || defaultUser || "root").trim();
+		const effPort = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 22;
+		for (const alias of currentAliases) {
+			const effHost = (hostName || alias).trim();
+			if (!effHost || !effUser || /[\s@]/.test(effHost) || /[\s@]/.test(effUser)) continue;
+			const uri = `ssh://${effUser}@${effHost}:${effPort}/~`;
+			if (seenUris.has(`${alias}::${uri}`)) continue;
+			seenUris.add(`${alias}::${uri}`);
+			const label = hostName && hostName !== alias ? `${alias} (${effUser}@${effHost})` : `${alias} (${effUser})`;
+			out.push({ label, uri, source: "ssh_config" });
+		}
+		currentAliases = [];
+		hostName = "";
+		user = "";
+		port = 22;
+	};
+
+	for (const rawLine of content.split(/\r?\n/)) {
+		const line = rawLine.replace(/#.*/, "").trim();
+		if (!line) continue;
+		const m = /^([A-Za-z][A-Za-z0-9-]*)\s*(?:=|\s)\s*(.+)$/.exec(line);
+		if (!m) continue;
+		const key = m[1].toLowerCase();
+		const rawVal = m[2].trim().replace(/^["']|["']$/g, "");
+		if (!rawVal) continue;
+
+		if (key === "host") {
+			flush();
+			currentAliases = rawVal
+				.split(/\s+/)
+				.map((p) => p.replace(/^["']|["']$/g, "").trim())
+				.filter((p) => Boolean(p) && !/[*?!]/.test(p));
+		} else if (key === "match") {
+			flush();
+		} else if (currentAliases.length > 0) {
+			if (key === "hostname" && !hostName) {
+				hostName = rawVal;
+			} else if (key === "user" && !user) {
+				user = rawVal;
+			} else if (key === "port" && port === 22) {
+				const p = parseInt(rawVal, 10);
+				if (Number.isInteger(p) && p >= 1 && p <= 65535) port = p;
+			}
+		}
+	}
+	flush();
+	return out;
+}
+
+/**
+ * 异步汇总已保存的 SSH 配置（`ssh-profiles.json`）与 `~/.ssh/config` 主机列表（纯 fs.promises，无同步子进程）。
+ */
+export async function listAvailableSshHosts(
+	sshProfiles?: RemoteSshProfileSummary[],
+	sshConfigText?: string,
+	defaultUser = defaultSystemUsername(),
+): Promise<SshHostOption[]> {
+	const out: SshHostOption[] = [];
+	const seenUris = new Set<string>();
+
+	let profiles = sshProfiles;
+	if (!profiles) {
+		try {
+			profiles = (await getGlobalRemoteSshService()?.listProfiles()) ?? [];
+		} catch {
+			profiles = [];
+		}
+	}
+	for (const p of profiles) {
+		if (!p?.host || !p?.username) continue;
+		const port = p.port || 22;
+		const remotePath = p.remotePath?.trim() || "/~";
+		const uri =
+			remotePath === "/~" || remotePath === "~"
+				? `ssh://${p.username}@${p.host}:${port}/~`
+				: formatRemoteWorkspaceUri(p.username, p.host, port, remotePath);
+		if (seenUris.has(uri)) continue;
+		seenUris.add(uri);
+		const label =
+			p.name && p.name !== `${p.username}@${p.host}`
+				? `${p.name} (${p.username}@${p.host})`
+				: `${p.username}@${p.host}`;
+		out.push({ label, uri, source: "profile" });
+	}
+
+	let cfgText = sshConfigText;
+	if (cfgText === undefined) {
+		try {
+			cfgText = await readFile(join(homedir(), ".ssh", "config"), "utf8");
+		} catch {
+			cfgText = "";
+		}
+	}
+	if (cfgText) {
+		for (const item of parseSshConfigHosts(cfgText, defaultUser)) {
+			if (seenUris.has(item.uri)) continue;
+			seenUris.add(item.uri);
+			out.push(item);
+		}
+	}
+	return out;
 }

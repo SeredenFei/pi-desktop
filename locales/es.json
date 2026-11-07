@@ -1823,6 +1823,8 @@
 		"terminalShellHint": "The PI_WEB_SHELL environment variable takes precedence over this setting. A missing path falls back to Auto.",
 		"newTerminalWithShell": "New terminal with shell",
 		"terminalShellDefaultTag": "default",
+		"terminalLocalShellsGroup": "Local Shells",
+		"terminalRemoteSshGroup": "Remote SSH",
 		"termInteraction": "Terminal interaction",
 		"termInteractionDesc": "Small mouse and keyboard helpers inside the terminal. Stored on this device only (browser localStorage); each can be toggled separately and takes effect immediately.",
 		"termCopyOnSelect": "Copy on select",

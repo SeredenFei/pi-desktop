@@ -2007,6 +2007,8 @@ export const zh = {
 	terminalShellHint: "环境变量 PI_WEB_SHELL 优先于此设置。设置值不存在时自动回退到「自动」。",
 	newTerminalWithShell: "选择 shell 新建终端",
 	terminalShellDefaultTag: "默认",
+	terminalLocalShellsGroup: "本地 Shell",
+	terminalRemoteSshGroup: "远程 SSH",
 	termInteraction: "终端交互",
 	termInteractionDesc:
 		"终端内的鼠标与键盘小功能，仅保存在本设备（浏览器 localStorage），每项可单独开关，改动立即生效。",
@@ -4827,6 +4829,8 @@ export const en: Record<keyof typeof zh, string> = {
 		"The PI_WEB_SHELL environment variable takes precedence over this setting. A missing path falls back to Auto.",
 	newTerminalWithShell: "New terminal with shell",
 	terminalShellDefaultTag: "default",
+	terminalLocalShellsGroup: "Local Shells",
+	terminalRemoteSshGroup: "Remote SSH",
 	termInteraction: "Terminal interaction",
 	termInteractionDesc:
 		"Small mouse and keyboard helpers inside the terminal. Stored on this device only (browser localStorage); each can be toggled separately and takes effect immediately.",

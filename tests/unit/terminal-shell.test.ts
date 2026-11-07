@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { TerminalManager } from "../../server/terminals.js";
 import {
+	listAvailableSshHosts,
 	normalizeTerminalShell,
 	parseEtcShells,
+	parseSshConfigHosts,
 	pickUserShell,
 	resolveConfiguredShell,
 	shellArgsFor,
@@ -191,5 +193,82 @@ describe("TerminalManager.create — per-terminal shell gate", () => {
 		expect(info).toBeNull();
 		expect(events.some((e) => e.type === "notice" && /Shell not allowed/.test(e.textEn ?? e.text ?? ""))).toBe(true);
 		expect(mgr.has("t1")).toBe(false);
+	});
+});
+
+describe("parseSshConfigHosts & listAvailableSshHosts", () => {
+	it("parses non-wildcard Host blocks from ~/.ssh/config and skips wildcards/Match blocks", () => {
+		const cfg = `
+# Global defaults
+Host *
+  User globaluser
+  ServerAliveInterval 60
+
+Host dev-box prod-box
+  HostName 10.0.1.25
+  User ubuntu
+  Port 2222
+
+Host gpu-*.internal !bastion
+  HostName 10.0.9.9
+
+Host bastion
+  User ops
+
+Match host *.corp
+  User corpuser
+`;
+		const hosts = parseSshConfigHosts(cfg, "sereden");
+		expect(hosts).toEqual([
+			{
+				label: "dev-box (ubuntu@10.0.1.25)",
+				uri: "ssh://ubuntu@10.0.1.25:2222/~",
+				source: "ssh_config",
+			},
+			{
+				label: "prod-box (ubuntu@10.0.1.25)",
+				uri: "ssh://ubuntu@10.0.1.25:2222/~",
+				source: "ssh_config",
+			},
+			{
+				label: "bastion (ops)",
+				uri: "ssh://ops@bastion:22/~",
+				source: "ssh_config",
+			},
+		]);
+	});
+
+	it("merges saved SSH profiles with ~/.ssh/config and deduplicates by URI", async () => {
+		const merged = await listAvailableSshHosts(
+			[
+				{
+					name: "My GPU Server",
+					host: "192.168.1.50",
+					port: 22,
+					username: "root",
+					authType: "key",
+					lastConnected: 1700000000000,
+					remotePath: "/workspace/llm",
+				},
+			],
+			`
+Host gpu-home
+  HostName 192.168.1.50
+  User root
+`,
+			"sereden",
+		);
+		expect(merged).toEqual([
+			{
+				label: "My GPU Server (root@192.168.1.50)",
+				uri: "ssh://root@192.168.1.50:22/workspace/llm",
+				source: "profile",
+			},
+			{
+				label: "gpu-home (root@192.168.1.50)",
+				uri: "ssh://root@192.168.1.50:22/~",
+				source: "ssh_config",
+			},
+		]);
 	});
 });

@@ -3912,6 +3912,7 @@ export class ClientSession {
 		const botExecution = getBotExecution(clientId);
 		botExecution?.assertActive();
 		if (botExecution) cwd = botExecution.bot.cwd;
+		cwd = restoreWorkspaceUriFromSessionDir(cwd);
 		const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 
 		const cs = new ClientSession(clientId, cwd, agentDir, stateStore);
@@ -16320,8 +16321,8 @@ export class ClientSession {
 			const { resolve } = await import("node:path");
 			this.files.unwatchGit(); // stale repo's watcher must not fire across projects
 			const fs = await import("node:fs/promises");
-			const trimmed = newCwd.trim();
-			if (trimmed === MACHINE_ROOT) {
+			const rawTrimmed = newCwd.trim();
+			if (rawTrimmed === MACHINE_ROOT) {
 				// 机器根是虚拟层（盘符列表），不能作工作目录——指引用户选具体目录。
 				this.emit({
 					type: "notice",
@@ -16331,6 +16332,7 @@ export class ClientSession {
 				});
 				return;
 			}
+			const trimmed = restoreWorkspaceUriFromSessionDir(rawTrimmed);
 			const isRemote = isRemoteWorkspaceUri(trimmed);
 			let abs: string;
 			let sessionBaseDir: string;
@@ -16342,12 +16344,19 @@ export class ClientSession {
 				// Windows 裸盘符（"C:"）与相对路径基准的处理收敛到 resolveCwdTarget
 				// （纯函数，含 win32/posix 差异说明与单测）。
 				const baseForResolve = isRemoteWorkspaceUri(this.cwd) ? homedir() : this.cwd;
-				abs = resolveCwdTarget(trimmed, baseForResolve);
-				const st = await fs.stat(abs);
+				const resolvedLocal = resolveCwdTarget(trimmed, baseForResolve);
+				const st = await fs.stat(resolvedLocal);
 				if (!st.isDirectory()) {
 					throw new Error("路径不是目录");
 				}
-				sessionBaseDir = abs;
+				const restored = restoreWorkspaceUriFromSessionDir(resolvedLocal);
+				if (isRemoteWorkspaceUri(restored)) {
+					abs = restored;
+					sessionBaseDir = resolveWorkspaceSessionDir(this.stateStore?.dataDir, abs);
+				} else {
+					abs = resolvedLocal;
+					sessionBaseDir = abs;
+				}
 			}
 			if (abs === this.cwd) {
 				this.emit({

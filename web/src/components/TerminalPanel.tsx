@@ -335,23 +335,46 @@ export function TerminalPanel({ chat, terminal, uiTerminalToolbar, onUiAction }:
 				>
 					<FiPlus />
 				</button>
-				{shellState.shells.length > 0 && (
+				{(shellState.shells.length > 0 || shellState.sshHosts.length > 0) && (
 					<select
 						className="panel-new panel-new-shell"
 						aria-label={t("newTerminalWithShell")}
 						title={t("newTerminalWithShell")}
 						value=""
 						onChange={(e) => {
-							if (e.target.value) openShell(e.target.value);
+							const val = e.target.value;
+							if (!val) return;
+							if (val.startsWith("ssh-host:")) {
+								const idx = Number(val.slice("ssh-host:".length));
+								const host = shellState.sshHosts[idx];
+								if (host) {
+									openTab({ title: host.label, cwd: host.uri });
+								}
+							} else {
+								openShell(val);
+							}
 						}}
 					>
 						<option value="">▾</option>
-						{shellState.shells.map((sh) => (
-							<option key={sh.path} value={sh.path}>
-								{sh.label === shellBaseName(sh.path) ? sh.label : `${sh.label} (${shellBaseName(sh.path)})`}
-								{sh.path === shellState.autoShell ? ` · ${t("terminalShellDefaultTag")}` : ""}
-							</option>
-						))}
+						{shellState.shells.length > 0 && (
+							<optgroup label={t("terminalLocalShellsGroup")}>
+								{shellState.shells.map((sh) => (
+									<option key={sh.path} value={sh.path}>
+										{sh.label === shellBaseName(sh.path) ? sh.label : `${sh.label} (${shellBaseName(sh.path)})`}
+										{sh.path === shellState.autoShell ? ` · ${t("terminalShellDefaultTag")}` : ""}
+									</option>
+								))}
+							</optgroup>
+						)}
+						{shellState.sshHosts.length > 0 && (
+							<optgroup label={t("terminalRemoteSshGroup")}>
+								{shellState.sshHosts.map((host, idx) => (
+									<option key={`${host.source}-${host.uri}-${idx}`} value={`ssh-host:${idx}`}>
+										🌐 {host.label}
+									</option>
+								))}
+							</optgroup>
+						)}
 					</select>
 				)}
 			</>

@@ -41,6 +41,8 @@ import {
 	isRemoteWorkspaceUri,
 	parseRemoteWorkspaceUri,
 	resolveWorkspaceSessionDir,
+	restoreWorkspaceUriFromSessionDir,
+	shellQuotePosix,
 } from "./remote-ssh-service.js";
 
 // ---------------------------------------------------------------------------
@@ -1063,7 +1065,8 @@ export class TerminalManager {
 	}
 
 	private get workspaceRoot(): string {
-		return typeof this.rootSource === "function" ? this.rootSource() : this.rootSource;
+		const raw = typeof this.rootSource === "function" ? this.rootSource() : this.rootSource;
+		return restoreWorkspaceUriFromSessionDir(raw);
 	}
 
 	private ownedEmit(emit: (msg: ServerMessage) => void): (msg: ServerMessage) => void {
@@ -1290,33 +1293,38 @@ export class TerminalManager {
 		locale?: string,
 		requestedShell?: string,
 	): boolean {
-		let abs = cwd;
+		let abs = restoreWorkspaceUriFromSessionDir(cwd);
 		let shell: string;
 		let args: string[];
-		const targetUri =
-			cwd && cwd.startsWith("ssh://")
-				? cwd
-				: this.workspaceRoot && this.workspaceRoot.startsWith("ssh://")
-					? this.workspaceRoot
-					: null;
+		const targetUri = isRemoteWorkspaceUri(abs)
+			? abs
+			: isRemoteWorkspaceUri(this.workspaceRoot)
+				? this.workspaceRoot
+				: null;
 
+		let normalizedUri: string | null = null;
+		let sshCliFallbackBanner: string | null = null;
 		if (targetUri) {
-			const match = /^ssh:\/\/([^@]+)@([^:]+):(\d+)(\/.*)$/.exec(targetUri);
-			if (match) {
-				const username = match[1];
-				const host = match[2];
-				const port = match[3];
-				const remotePath = match[4];
-				abs = homedir();
-				shell = process.platform === "win32" ? "ssh.exe" : "ssh";
-				args = ["-t", "-p", port, `${username}@${host}`, `cd "${remotePath}" && exec bash -l || exec sh`];
-			} else {
-				if (!abs) abs = homedir();
-				else if (!isAbsolute(abs)) abs = resolve(abs);
-				const s = this.pickShell(forceBash, requestedShell);
-				shell = s.shell;
-				args = s.args;
+			const parsed = parseRemoteWorkspaceUri(targetUri);
+			if (!parsed) {
+				this.fail(id, `无效的远程 SSH 工作区地址：${targetUri}`, `Invalid remote SSH workspace URI: ${targetUri}`);
+				return false;
 			}
+			normalizedUri = `ssh://${parsed.username}@${parsed.host}:${parsed.port}${parsed.remotePath}`;
+			abs = normalizedUri;
+			shell = process.platform === "win32" ? "ssh.exe" : "ssh";
+			const cdTarget =
+				parsed.remotePath === "/~" || parsed.remotePath === "~"
+					? 'cd "$HOME"'
+					: `cd ${shellQuotePosix(parsed.remotePath)}`;
+			args = [
+				"-t",
+				"-p",
+				String(parsed.port),
+				`${parsed.username}@${parsed.host}`,
+				`${cdTarget} && exec "\${SHELL:-/bin/bash}" -l || exec bash -l || exec sh`,
+			];
+			sshCliFallbackBanner = `\x1b[33m[SSH] 内置远程连接服务未就绪，已回退系统 ssh 命令连接 ${parsed.username}@${parsed.host}:${parsed.port} ...\x1b[0m\r\n`;
 		} else {
 			if (!abs) abs = homedir();
 			else if (!isAbsolute(abs)) abs = resolve(abs);
@@ -1339,17 +1347,20 @@ export class TerminalManager {
 		repairSpawnHelperPermissions();
 		let pty: IPty;
 		try {
-			const sshSvc = targetUri ? getGlobalRemoteSshService() : null;
-			if (targetUri && sshSvc) {
-				pty = sshSvc.createVirtualPty(targetUri, cols, rows);
+			const sshSvc = normalizedUri ? getGlobalRemoteSshService() : null;
+			if (normalizedUri && sshSvc) {
+				pty = sshSvc.createVirtualPty(normalizedUri, cols, rows);
 			} else {
 				pty = spawn(shell, args, {
 					name: "xterm-256color",
 					cols: Math.max(2, Math.floor(cols) || 80),
 					rows: Math.max(2, Math.floor(rows) || 24),
-					cwd: abs,
+					cwd: normalizedUri ? homedir() : abs,
 					env: shellEnv(),
 				});
+				if (sshCliFallbackBanner) {
+					this.writeOut(id, sshCliFallbackBanner);
+				}
 			}
 		} catch (err) {
 			const helper = brokenSpawnHelper();
@@ -1542,6 +1553,15 @@ export class TerminalManager {
 	}
 
 	private safeCwd(raw: string): string | null {
+		raw = restoreWorkspaceUriFromSessionDir(raw);
+		// 用户终端允许直接打开任意合法的远程 SSH 主机 URI（如新建终端下拉菜单的 SSH 主机快捷入口），
+		// 即使当前项目是本地工作区或另一个远程工作区。
+		if (this.ownerKind === "client" && isRemoteWorkspaceUri(raw)) {
+			const cand = parseRemoteWorkspaceUri(raw);
+			if (!cand) return null;
+			const candidatePath = posix.normalize(cand.remotePath);
+			return `ssh://${cand.username}@${cand.host}:${cand.port}${candidatePath}`;
+		}
 		// 远程工作区的根是 ssh:// URI：下面的本地文件系统边界（realpath/relative）
 		// 无法解析它，会让远程终端的每次创建/接管命令都被「必须位于工作区内」拒掉，
 		// spawnShell 的远程分支成为死代码。远程侧的目录边界由 SSH 服务在远端校验，

@@ -4469,8 +4469,13 @@ export type ServerMessage =
 			ownerKind?: "client" | "conversation";
 	  }
 	| { type: "terminal_list"; conversationId?: string; terminals: TerminalInfo[] }
-	/** Reply to `list_terminal_shells`: detected shells + what "auto" resolves to right now. */
-	| { type: "terminal_shells"; shells: Array<{ path: string; label: string }>; autoShell: string }
+	/** Reply to `list_terminal_shells`: detected shells + what "auto" resolves to right now + optional SSH quick-open hosts. */
+	| {
+			type: "terminal_shells";
+			shells: Array<{ path: string; label: string }>;
+			autoShell: string;
+			sshHosts?: Array<{ label: string; uri: string; source: "profile" | "ssh_config" }>;
+	  }
 	// -- command list (.pi/commands.json) ------------------------------------
 	| { type: "commands"; commands: CommandDef[]; path: string }
 	/** The slash-command catalog for the chat input (builtin + extension +

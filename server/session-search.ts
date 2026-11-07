@@ -14,6 +14,7 @@ import * as fsPromises from "node:fs/promises";
 import { basename, resolve, sep } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import type { MessageAnchor } from "./protocol.js";
+import { restoreWorkspaceUriFromSessionDir } from "./remote-ssh-service.js";
 import { sessionLines, mapSessionsConcurrent } from "./session-scan.js";
 export { mapSessionsConcurrent } from "./session-scan.js";
 
@@ -183,7 +184,9 @@ export async function readCwdFromSessionHeader(filePath: string): Promise<string
 		const firstLine = nl !== -1 ? text.slice(0, nl) : text;
 		if (!firstLine.trim()) return null;
 		const parsed = JSON.parse(firstLine);
-		return typeof parsed.cwd === "string" && parsed.cwd.trim() ? parsed.cwd : null;
+		return typeof parsed.cwd === "string" && parsed.cwd.trim()
+			? restoreWorkspaceUriFromSessionDir(parsed.cwd.trim())
+			: null;
 	} catch {
 		return null;
 	} finally {

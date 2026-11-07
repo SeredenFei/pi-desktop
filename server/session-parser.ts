@@ -14,6 +14,7 @@ import { basename, join, resolve } from "node:path";
 import { SessionManager, type SessionInfo } from "@earendil-works/pi-coding-agent";
 import type { ProjectSummary } from "./protocol.js";
 import { normalizePathKey } from "./client-state.js";
+import { isRemoteWorkspaceUri, restoreWorkspaceUriFromSessionDir } from "./remote-ssh-service.js";
 import { MAX_SEARCH_TEXT_CHARS, readCwdFromSessionHeader, piSessionsRoot } from "./session-search.js";
 
 /**
@@ -57,7 +58,7 @@ export async function discoverRecentProjectsFromDisk(sessionRoots: string[], lim
 						if (!projects.has(key)) {
 							try {
 								// 异步探测（issue #441）：cwd 可能在已断连的网络盘上。
-								await fsPromises.access(cwd);
+								if (!isRemoteWorkspaceUri(cwd)) await fsPromises.access(cwd);
 								projects.set(key, { path: cwd, lastUsed: s.mtime });
 							} catch {}
 						}
@@ -130,7 +131,7 @@ export async function discoverRecentProjectsFromDisk(sessionRoots: string[], lim
 						if (!projects.has(key)) {
 							try {
 								// 异步探测（issue #441）：cwd 可能在已断连的网络盘上。
-								await fsPromises.access(r.path);
+								if (!isRemoteWorkspaceUri(r.path)) await fsPromises.access(r.path);
 								projects.set(key, r);
 							} catch {}
 						}
@@ -197,7 +198,7 @@ export async function parseSessionInfoFast(
 			if (!rec) continue;
 			if (rec.type === "session") {
 				id = typeof rec.id === "string" ? rec.id : "";
-				cwd = typeof rec.cwd === "string" ? rec.cwd : "";
+				cwd = typeof rec.cwd === "string" ? restoreWorkspaceUriFromSessionDir(rec.cwd) : "";
 				if (typeof rec.timestamp === "string") headerTime = new Date(rec.timestamp).getTime();
 				if (typeof rec.parentSession === "string") parentSessionPath = rec.parentSession;
 			} else if (rec.type === "session_info") {

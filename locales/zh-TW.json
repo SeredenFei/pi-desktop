@@ -1823,6 +1823,8 @@
 		"terminalShellHint": "環境變數 PI_WEB_SHELL 優先於此設定。設定值不存在時自動回退到「自動」。",
 		"newTerminalWithShell": "選擇 shell 新建終端機",
 		"terminalShellDefaultTag": "預設",
+		"terminalLocalShellsGroup": "本地 Shell",
+		"terminalRemoteSshGroup": "遠端 SSH",
 		"termInteraction": "終端機交互",
 		"termInteractionDesc": "終端機内的滑鼠与键盘小功能，仅儲存在本设备（浏览器 localStorage），每项可单独开关，改动立即生效。",
 		"termCopyOnSelect": "选中即複製",

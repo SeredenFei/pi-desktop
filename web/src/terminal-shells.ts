@@ -14,15 +14,23 @@ export interface TerminalShellOption {
 	label: string;
 }
 
+export interface TerminalSshHostOption {
+	label: string;
+	uri: string;
+	source: "profile" | "ssh_config";
+}
+
 export interface TerminalShellsState {
 	shells: TerminalShellOption[];
 	/** 「自动」当前解析到的 shell 路径（PI_WEB_SHELL > 登录 shell > $SHELL > bash）。 */
 	autoShell: string;
+	/** 已保存 SSH 配置与 ~/.ssh/config 主机快捷列表。 */
+	sshHosts: TerminalSshHostOption[];
 	/** 是否已收到过服务端回复。 */
 	loaded: boolean;
 }
 
-const EMPTY: TerminalShellsState = { shells: [], autoShell: "", loaded: false };
+const EMPTY: TerminalShellsState = { shells: [], autoShell: "", sshHosts: [], loaded: false };
 let state: TerminalShellsState = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -31,19 +39,36 @@ export function shellBaseName(p: string): string {
 	return p.split(/[\\/]/).pop() || p;
 }
 
-export function setTerminalShells(next: { shells?: TerminalShellOption[]; autoShell?: string }): void {
+export function setTerminalShells(next: {
+	shells?: TerminalShellOption[];
+	autoShell?: string;
+	sshHosts?: TerminalSshHostOption[];
+}): void {
 	const shells = Array.isArray(next.shells)
 		? next.shells.filter((s) => s && typeof s.path === "string" && typeof s.label === "string")
 		: [];
 	const autoShell = typeof next.autoShell === "string" ? next.autoShell : "";
+	const sshHosts = Array.isArray(next.sshHosts)
+		? next.sshHosts.filter(
+				(h) =>
+					h &&
+					typeof h.label === "string" &&
+					typeof h.uri === "string" &&
+					(h.source === "profile" || h.source === "ssh_config"),
+			)
+		: [];
 	if (
 		state.loaded &&
 		state.autoShell === autoShell &&
 		state.shells.length === shells.length &&
-		state.shells.every((s, i) => s.path === shells[i].path && s.label === shells[i].label)
+		state.shells.every((s, i) => s.path === shells[i].path && s.label === shells[i].label) &&
+		state.sshHosts.length === sshHosts.length &&
+		state.sshHosts.every(
+			(h, i) => h.uri === sshHosts[i].uri && h.label === sshHosts[i].label && h.source === sshHosts[i].source,
+		)
 	)
 		return;
-	state = { shells, autoShell, loaded: true };
+	state = { shells, autoShell, sshHosts, loaded: true };
 	for (const l of listeners) l();
 }
 
