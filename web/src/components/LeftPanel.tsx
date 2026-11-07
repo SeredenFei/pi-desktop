@@ -2282,13 +2282,7 @@ export const LeftPanel = memo(function LeftPanel({
 							<button
 								type="button"
 								className={`lp-section-action lp-project-action ${workspaceMenuOpen ? "active" : ""}`}
-								title={
-									sidebarMode === "chat"
-										? "新建 Chat 项目"
-										: workspaceMenuOpen
-											? undefined
-											: t("openProject")
-								}
+								title={sidebarMode === "chat" ? "新建 Chat 项目" : workspaceMenuOpen ? undefined : t("openProject")}
 								aria-label={sidebarMode === "chat" ? "新建 Chat 项目" : t("openProject")}
 								aria-expanded={workspaceMenuOpen}
 								onClick={(e) => {
@@ -2514,7 +2508,10 @@ export const LeftPanel = memo(function LeftPanel({
 										if (!isCollapsed) {
 											for (const s of visibleIdleSessions) {
 												const sNorm = normalizeSessionPathKey(s.path);
-												const sortTime = Math.max(s.modified ?? 0, sNorm ? (convActiveTimeRef.current.get(sNorm) ?? 0) : 0);
+												const sortTime = Math.max(
+													s.modified ?? 0,
+													sNorm ? (convActiveTimeRef.current.get(sNorm) ?? 0) : 0,
+												);
 												mergedProjectItems.push({
 													kind: "session",
 													session: s,
@@ -2813,11 +2810,7 @@ export const LeftPanel = memo(function LeftPanel({
 														{mergedProjectItems.flatMap((item) =>
 															item.kind === "conv"
 																? item.group.rows.map((row) =>
-																		renderSingleConvRow(
-																			row,
-																			p.path,
-																			row.depth === 0 ? item.displayTime : undefined,
-																		),
+																		renderSingleConvRow(row, p.path, row.depth === 0 ? item.displayTime : undefined),
 																	)
 																: [renderHistorySessionRow(item.session, p.path)],
 														)}

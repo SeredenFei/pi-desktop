@@ -178,7 +178,10 @@ describe("MemoryStore & cross-device merge", () => {
 			store.getView(dir).chatSpaceCwd,
 		);
 		expect(extracted.length).toBeGreaterThanOrEqual(2);
-		const allTexts = store.listActiveItems("global").map((i) => i.content).join(" | ");
+		const allTexts = store
+			.listActiveItems("global")
+			.map((i) => i.content)
+			.join(" | ");
 		expect(allTexts).toContain("3080");
 		expect(allTexts).toContain("找工作找实习");
 	});

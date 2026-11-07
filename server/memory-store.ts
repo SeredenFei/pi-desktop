@@ -1312,7 +1312,8 @@ export class MemoryStore {
 		const added: MemoryItem[] = [];
 
 		// 1. 显式要求记住的内容：「记住…」「请记住…」「我的偏好是…」
-		const explicitRe = /(?:请?帮我记住|请?记住|记一下|我的偏好是|以后默认|remember that)\s*[:：，,]?\s*([^\n。；;]{4,180})/gi;
+		const explicitRe =
+			/(?:请?帮我记住|请?记住|记一下|我的偏好是|以后默认|remember that)\s*[:：，,]?\s*([^\n。；;]{4,180})/gi;
 		let m: RegExpExecArray | null;
 		while ((m = explicitRe.exec(clean)) !== null) {
 			const fact = m[1]?.trim();
@@ -1321,7 +1322,10 @@ export class MemoryStore {
 
 		// 2. 硬件与系统环境自述（例如包含显卡/内存/操作系统组合）
 		const hasOs = /\b(ubuntu|windows|macos|arch\s*linux|debian|wsl2?)\b/i.test(clean);
-		const hasHw = /\b(rtx\s*\d{3,4}|gtx\s*\d{3,4}|[1-9]\d*\s*g(?:b)?\s*(?:ddr\d|ram|内存|显存)|ddr[45]|m[1-4]\s*(?:pro|max|ultra)?|a100|h100|4090|3090|3080)\b/i.test(clean);
+		const hasHw =
+			/\b(rtx\s*\d{3,4}|gtx\s*\d{3,4}|[1-9]\d*\s*g(?:b)?\s*(?:ddr\d|ram|内存|显存)|ddr[45]|m[1-4]\s*(?:pro|max|ultra)?|a100|h100|4090|3090|3080)\b/i.test(
+				clean,
+			);
 		if (hasOs && hasHw) {
 			const clauses = clean
 				.split(/[。\n；;，,]|(?=(?:[1-9][、.\s]*)?(?:当前基础|目前基础|最终目的|目的是|目标是))/)
@@ -1336,7 +1340,10 @@ export class MemoryStore {
 		}
 
 		// 3. 个人技术基础与学习/求职目标自述
-		const bgMatch = /(?:当前基础|目前基础|个人基础|我的基础)\s*(?:是|为|[:：])?\s*([^\n。；;]{4,140}?)(?=\s*(?:[1-9][、.\s]*)?(?:最终目的|学习目的|目的是|目标是|$))/i.exec(clean);
+		const bgMatch =
+			/(?:当前基础|目前基础|个人基础|我的基础)\s*(?:是|为|[:：])?\s*([^\n。；;]{4,140}?)(?=\s*(?:[1-9][、.\s]*)?(?:最终目的|学习目的|目的是|目标是|$))/i.exec(
+				clean,
+			);
 		if (bgMatch?.[1]) {
 			added.push(this.addItem("global", `技术基础：${bgMatch[1].trim()}`, cwd));
 		}

@@ -9,7 +9,12 @@
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { sanitizeProjectSlug, type MemoryDocument, type MemoryStore, type TranscriptIndexEntry } from "./memory-store.js";
+import {
+	sanitizeProjectSlug,
+	type MemoryDocument,
+	type MemoryStore,
+	type TranscriptIndexEntry,
+} from "./memory-store.js";
 
 /** GitHub 官方 OAuth App Public Client ID（支持 Device Flow 申请 repo scope）。 */
 const GITHUB_DEVICE_CLIENT_ID = "178c6fc778ccc68e1d6a";
@@ -355,9 +360,7 @@ export class MemorySyncService {
 			throw new Error(`读取远端 ${repoPath} 失败（HTTP ${res.status}）`);
 		}
 		const payload = (await res.json()) as { sha?: string; content?: string };
-		const text = payload.content
-			? Buffer.from(payload.content.replace(/\s+/g, ""), "base64").toString("utf8")
-			: "";
+		const text = payload.content ? Buffer.from(payload.content.replace(/\s+/g, ""), "base64").toString("utf8") : "";
 		return { sha: payload.sha || "", text };
 	}
 
@@ -455,24 +458,13 @@ export class MemorySyncService {
 					(lMeta?.updatedAt ?? 0) > (rMeta.updatedAt ?? 0);
 				if (needPush) {
 					const safeSid = sanitizeProjectSlug(sid);
-					await this.putRemoteFile(
-						acc,
-						`transcripts/${safeSid}.jsonl`,
-						tr.jsonl,
-						`sync transcript ${safeSid}`,
-					);
+					await this.putRemoteFile(acc, `transcripts/${safeSid}.jsonl`, tr.jsonl, `sync transcript ${safeSid}`);
 				}
 			}
 
 			// 推送干净轻量的 memory-store.json（仅含记忆、项目与 transcriptIndex 索引）
 			const bodyText = JSON.stringify(indexDoc, null, "\t");
-			await this.putRemoteFile(
-				acc,
-				REMOTE_FILE_PATH,
-				bodyText,
-				`sync memory (${new Date().toISOString()})`,
-				remoteSha,
-			);
+			await this.putRemoteFile(acc, REMOTE_FILE_PATH, bodyText, `sync memory (${new Date().toISOString()})`, remoteSha);
 			acc.lastSyncedAt = Date.now();
 			this.saveAccount();
 		} catch (err) {

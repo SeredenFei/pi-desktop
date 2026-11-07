@@ -927,4 +927,3 @@ html[data-shell="minimal"] .lp-project-head-row .lp-project-actions:has(.confirm
 html[data-shell="minimal"] .lp-project-head-row:has(.confirm) .project-time {
 	display: none;
 }
-

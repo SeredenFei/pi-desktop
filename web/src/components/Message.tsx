@@ -2193,8 +2193,7 @@ function Block({
 				);
 			}
 		}
-		const effectiveTextStr =
-			embeddedThinking && embeddedThinking.thinking ? embeddedThinking.answer : cleanedText;
+		const effectiveTextStr = embeddedThinking && embeddedThinking.thinking ? embeddedThinking.answer : cleanedText;
 		const text = effectiveTextStr === rawText.text ? rawText : { ...rawText, text: effectiveTextStr };
 		// 单行消息：复制键不再用绝对定位压住文字，改成行内 flex 右键——与各 head
 		// 同样的 6px 间距、垂直居中、28px 尺寸。多行仍用右上浮层。

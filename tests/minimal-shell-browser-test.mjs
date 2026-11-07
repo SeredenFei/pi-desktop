@@ -115,7 +115,11 @@ async function main() {
 		return { overflow, scrollTop: app.scrollTop, top };
 	});
 	check("外壳无滚动余量（状态行气泡不探出视口）", shellScroll.overflow <= 0, shellScroll);
-	check("强制滚动 / scrollIntoView 后标题栏仍在顶部", shellScroll.scrollTop === 0 && shellScroll.top === 0, shellScroll);
+	check(
+		"强制滚动 / scrollIntoView 后标题栏仍在顶部",
+		shellScroll.scrollTop === 0 && shellScroll.top === 0,
+		shellScroll,
+	);
 
 	console.log("2. 配色");
 	check("跟随系统：浅色", (await page.getAttribute("html", "data-scheme")) === "light");
@@ -308,7 +312,11 @@ async function main() {
 	await page.keyboard.press("Enter");
 	await sleep(500);
 	const chatProjNames = await page.locator(".lp-project-name").allTextContents();
-	check("新建 Chat 项目 RL-Study 立即出现在 Chat 列表", chatProjNames.some((n) => n.includes("RL-Study")), chatProjNames);
+	check(
+		"新建 Chat 项目 RL-Study 立即出现在 Chat 列表",
+		chatProjNames.some((n) => n.includes("RL-Study")),
+		chatProjNames,
+	);
 
 	// 验证：项目支持内联改名，改名后侧栏与顶栏同步更新
 	await page.click('[data-testid="rename-project-RL-Study"]');

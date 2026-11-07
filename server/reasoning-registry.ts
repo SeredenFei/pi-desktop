@@ -118,7 +118,8 @@ const KNOWN_REASONING_SPECS: {
 	},
 	// 4. Google Gemini 2.0 / 2.5 / 3+ / 4+ (Flash Thinking / Pro / Argon)
 	{
-		pattern: /(?:^|[-_/])gemini[-_](?:(?:2\.[0-9]|2[-_]5)[-_](?:flash[-_]thinking|pro)|[3-9][-_](?:pro|argon|ultra|flash[-_]thinking)|4[-_]?argon)/i,
+		pattern:
+			/(?:^|[-_/])gemini[-_](?:(?:2\.[0-9]|2[-_]5)[-_](?:flash[-_]thinking|pro)|[3-9][-_](?:pro|argon|ultra|flash[-_]thinking)|4[-_]?argon)/i,
 		spec: {
 			type: "budget",
 			thinkingLevelMap: {
@@ -283,9 +284,7 @@ export function detectVisionCapability(modelId: string, rawMeta?: Record<string,
  * 1. 若 `model.input` 显式包含 `"image"`，返回 true；
  * 2. 若 `model.input` 未配置或因网关缺失元数据仅默认 `["text"]`，则用权威多模态指纹（如 claude-opus-5-5、gemini-4-argon）兜底识别。
  */
-export function supportsModelVision(
-	model?: { id?: string; name?: string; input?: readonly string[] } | null,
-): boolean {
+export function supportsModelVision(model?: { id?: string; name?: string; input?: readonly string[] } | null): boolean {
 	if (!model) return false;
 	if (Array.isArray(model.input) && model.input.includes("image")) return true;
 	const inferred = detectVisionCapability(model.id ?? "") || detectVisionCapability(model.name ?? "");
