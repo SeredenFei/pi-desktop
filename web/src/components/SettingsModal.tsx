@@ -91,6 +91,13 @@ import {
 import { randomUuid } from "../uuid";
 import { THINKING_VALUES } from "../thinking-levels";
 import { formatTokenDraft, parseTokenInput } from "../token-input";
+import {
+	TERM_FONT_SIZE_MAX,
+	TERM_FONT_SIZE_MIN,
+	clampTermFontSize,
+	saveTermInteraction,
+	useTermInteraction,
+} from "../term-interaction";
 import { useWideChat, saveChatWidthSettings, useHideModelRow, saveHideModelRowSettings } from "../chat-width-settings";
 import { usePresentAutoOpen, savePresentAutoOpen } from "../present-settings";
 import { type SendKey, saveSendKeyPref, useEffectiveSendKey } from "../composer-keys";
@@ -1055,6 +1062,13 @@ export function SettingsModal({
 	const totalContextTokenEstimate = promptTokenEstimate + toolsSchemaTokenEstimate;
 	// 宽屏聊天列开关（纯前端 localStorage，见 chat-width-settings.ts）。
 	const wideChat = useWideChat();
+	// 终端交互小插件（纯前端 localStorage，见 term-interaction.ts）。
+	const termInteraction = useTermInteraction();
+	const [termFontDraft, setTermFontDraft] = useState(String(termInteraction.fontSize));
+	// 快捷键（Ctrl+= / -）在终端里改了字号后，设置页的草稿跟着同步。
+	useEffect(() => {
+		setTermFontDraft(String(termInteraction.fontSize));
+	}, [termInteraction.fontSize]);
 	const hideModelRow = useHideModelRow();
 	// 输入框回车行为（纯前端 localStorage，见 composer-keys.ts）。
 	const effectiveSendKey = useEffectiveSendKey();
@@ -3941,6 +3955,62 @@ export function SettingsModal({
 									value={settings.terminalShell ?? ""}
 									onChange={(v) => setPartial({ terminalShell: v })}
 								/>
+								<div className="set-field-label">
+									{t("termInteraction")} <HintTip text={t("termInteractionDesc")} />
+								</div>
+								<ToggleRow
+									title={t("termCopyOnSelect")}
+									tip={t("termCopyOnSelectDesc")}
+									enabled={termInteraction.copyOnSelect}
+									onToggle={() => saveTermInteraction({ copyOnSelect: !termInteraction.copyOnSelect })}
+								/>
+								<ToggleRow
+									title={t("termRightClick")}
+									tip={t("termRightClickDesc")}
+									enabled={termInteraction.rightClick}
+									onToggle={() => saveTermInteraction({ rightClick: !termInteraction.rightClick })}
+								/>
+								<ToggleRow
+									title={t("termMiddlePaste")}
+									tip={t("termMiddlePasteDesc")}
+									enabled={termInteraction.middlePaste}
+									onToggle={() => saveTermInteraction({ middlePaste: !termInteraction.middlePaste })}
+								/>
+								<ToggleRow
+									title={t("termSearch")}
+									tip={t("termSearchDesc")}
+									enabled={termInteraction.search}
+									onToggle={() => saveTermInteraction({ search: !termInteraction.search })}
+								/>
+								<ToggleRow
+									title={t("termLinks")}
+									tip={t("termLinksDesc")}
+									enabled={termInteraction.links}
+									onToggle={() => saveTermInteraction({ links: !termInteraction.links })}
+								/>
+								<ToggleRow
+									title={t("termFontShortcuts")}
+									tip={t("termFontShortcutsDesc")}
+									enabled={termInteraction.fontShortcuts}
+									onToggle={() => saveTermInteraction({ fontShortcuts: !termInteraction.fontShortcuts })}
+								/>
+								<FieldRow label={t("termFontSize")} tip={t("termFontSizeDesc")} htmlFor="term-font-size">
+									<input
+										id="term-font-size"
+										className="set-input"
+										type="number"
+										min={TERM_FONT_SIZE_MIN}
+										max={TERM_FONT_SIZE_MAX}
+										step={1}
+										value={termFontDraft}
+										onChange={(e) => setTermFontDraft(e.target.value)}
+										onBlur={() => {
+											const n = clampTermFontSize(Number(termFontDraft));
+											setTermFontDraft(String(n));
+											if (n !== termInteraction.fontSize) saveTermInteraction({ fontSize: n });
+										}}
+									/>
+								</FieldRow>
 								<div className="set-field-label">
 									{t("toolsSectionSubagent")} <HintTip text={t("toolsSubagentDepHint")} />
 								</div>

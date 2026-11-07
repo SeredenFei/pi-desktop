@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FiChevronDown, FiChevronUp, FiX } from "react-icons/fi";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { CommandDef } from "../types";
 import { buildTermTheme, THEME_CHANGE_EVENT } from "../theme";
@@ -8,6 +11,21 @@ import { shouldStartTouchScroll, touchWheelDeltaY } from "../term-touch";
 import { useI18n } from "../i18n";
 import { appSend } from "../app-globals";
 import type { TerminalOwnerKind } from "../terminal-bridge";
+import {
+	applyZoomShortcut,
+	canReadClipboard,
+	copyTextToClipboard,
+	getTermInteraction,
+	isLinkModifier,
+	isMacPlatform,
+	isSafeTermLink,
+	isSelectionMouseDown,
+	matchTermShortcut,
+	readTextFromClipboard,
+	rightClickAction,
+	saveTermInteraction,
+	subscribeTermInteraction,
+} from "../term-interaction";
 
 /** Strip exit sentinels/baked banners; the banner itself renders on terminal_exit. */
 function stripExitBanner(data: string): { clean: string; exitCode: number | null } {
@@ -63,6 +81,12 @@ export function TermXterm({
 }: TermXtermProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
+	// In-terminal search (SearchAddon + the small search box).
+	const searchRef = useRef<SearchAddon | null>(null);
+	const searchInputRef = useRef<HTMLInputElement>(null);
+	const [searchOpen, setSearchOpen] = useState(false);
+	const [searchQuery, setSearchQuery] = useState("");
+	const [searchFocusTick, setSearchFocusTick] = useState(0);
 	// PTY lifecycle: the mount effect must NOT re-run on a language switch
 	// (re-running would dispose and re-create the xterm view — scrollback lost
 	// — and, for run_command terminals, make the server kill the running
@@ -79,12 +103,15 @@ export function TermXterm({
 		const term = new Terminal({
 			theme: buildTermTheme(),
 			fontFamily: '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
-			fontSize: 13,
+			fontSize: getTermInteraction().fontSize,
 			cursorBlink: true,
 			scrollback: 8000,
 		});
 		const fit = new FitAddon();
 		term.loadAddon(fit);
+		const search = new SearchAddon();
+		term.loadAddon(search);
+		searchRef.current = search;
 		term.open(container);
 		termRef.current = { term, fit };
 		if (active) term.focus();
@@ -104,8 +131,29 @@ export function TermXterm({
 		//   · Ctrl+C with a selection → copy instead of ^C (text staged in the
 		//     helper textarea, same trick as xterm's own right-click copy; no
 		//     clipboard-API permission needed, works over plain http)
+		const isMac = isMacPlatform();
 		term.attachCustomKeyEventHandler((event) => {
 			if (event.type !== "keydown") return true;
+			// Terminal-interaction shortcuts (each behind its own setting). Returning
+			// false stops xterm forwarding the key; preventDefault stops the browser /
+			// Electron page zoom and find-in-page.
+			const shortcut = matchTermShortcut(event, isMac);
+			if (shortcut) {
+				const cfg = getTermInteraction();
+				if (shortcut === "search" && cfg.search) {
+					event.preventDefault();
+					const sel = term.getSelection();
+					if (sel && !sel.includes("\n")) setSearchQuery(sel);
+					setSearchOpen(true);
+					setSearchFocusTick((n) => n + 1);
+					return false;
+				}
+				if (shortcut !== "search" && cfg.fontShortcuts) {
+					event.preventDefault();
+					saveTermInteraction({ fontSize: applyZoomShortcut(cfg.fontSize, shortcut) });
+					return false;
+				}
+			}
 			const key = event.key?.toLowerCase();
 			if ((event.ctrlKey || event.metaKey) && key === "v") {
 				return false;
@@ -265,6 +313,105 @@ export function TermXterm({
 		termEl?.addEventListener("touchend", onTouchEnd);
 		termEl?.addEventListener("touchcancel", onTouchEnd);
 
+		// ---- Terminal-interaction plugins (settings: term-interaction.ts) --------
+		// All handlers read getTermInteraction() live, so toggling a setting takes
+		// effect on already-open terminals without rebuilding xterm.
+		// While a TUI owns the mouse (vim/htop mouse tracking) we leave clicks to it;
+		// Shift forces the terminal behavior, same as xterm's own selection override.
+		const mouseOwnedByApp = (e: MouseEvent) => term.modes.mouseTrackingMode !== "none" && !e.shiftKey;
+		const pasteIntoTerm = () => {
+			void readTextFromClipboard().then((text) => {
+				if (text && !displayDisposed) term.paste(text);
+			});
+		};
+
+		// Copy on select: only a selection created during a left-button press counts
+		// (programmatic selections — e.g. search hits — must not hit the clipboard).
+		let pressing = false;
+		let selectionDirty = false;
+		const selectionSub = term.onSelectionChange(() => {
+			if (pressing) selectionDirty = true;
+		});
+		const onMouseDown = (e: MouseEvent) => {
+			if (isSelectionMouseDown(e, isMac)) {
+				pressing = true;
+				selectionDirty = false;
+				return;
+			}
+			// Middle button: suppress the native (Linux PRIMARY) paste / Windows autoscroll
+			// only when our clipboard-API paste will handle it instead.
+			if (e.button === 1 && getTermInteraction().middlePaste && canReadClipboard() && !mouseOwnedByApp(e)) {
+				e.preventDefault();
+			}
+		};
+		const onMouseUp = (e: MouseEvent) => {
+			if (e.button === 1 && getTermInteraction().middlePaste && canReadClipboard() && !mouseOwnedByApp(e)) {
+				e.preventDefault();
+			}
+		};
+		const onWindowMouseUp = (e: MouseEvent) => {
+			if (e.button !== 0 || !pressing) return;
+			const dirty = selectionDirty;
+			pressing = false;
+			selectionDirty = false;
+			if (!dirty || !getTermInteraction().copyOnSelect || displayDisposed || !term.hasSelection()) return;
+			void copyTextToClipboard(term.getSelection());
+		};
+		const onAuxClick = (e: MouseEvent) => {
+			if (e.button !== 1) return;
+			if (!getTermInteraction().middlePaste || !canReadClipboard() || mouseOwnedByApp(e)) return;
+			e.preventDefault();
+			e.stopPropagation(); // xterm's own auxclick handler would also stage a native paste
+			pasteIntoTerm();
+		};
+		// Right click (also macOS Ctrl+click, which the OS reports as contextmenu):
+		// selection → copy and clear it; no selection → paste. Without a readable
+		// clipboard (plain http) fall through to the native menu so Paste still works.
+		const onContextMenu = (e: MouseEvent) => {
+			if (!getTermInteraction().rightClick || mouseOwnedByApp(e)) return;
+			const action = rightClickAction(term.hasSelection(), canReadClipboard());
+			if (action === "native") return;
+			e.preventDefault();
+			e.stopPropagation();
+			if (action === "copy") {
+				const text = term.getSelection();
+				term.clearSelection();
+				void copyTextToClipboard(text);
+			} else {
+				pasteIntoTerm();
+			}
+		};
+		termEl?.addEventListener("mousedown", onMouseDown, true);
+		termEl?.addEventListener("mouseup", onMouseUp, true);
+		termEl?.addEventListener("auxclick", onAuxClick, true);
+		termEl?.addEventListener("contextmenu", onContextMenu, true);
+		window.addEventListener("mouseup", onWindowMouseUp);
+
+		// Links (Ctrl/Cmd+click) and font size follow the live settings; the addon is
+		// loaded/disposed on demand so the hover underline disappears when disabled.
+		let linksAddon: WebLinksAddon | null = null;
+		const applyInteractionSettings = () => {
+			if (displayDisposed) return;
+			const cfg = getTermInteraction();
+			if (cfg.links && !linksAddon) {
+				linksAddon = new WebLinksAddon((event, uri) => {
+					// window.open: Electron's setWindowOpenHandler routes it to the system browser.
+					if (isLinkModifier(event) && isSafeTermLink(uri)) window.open(uri, "_blank", "noopener,noreferrer");
+				});
+				term.loadAddon(linksAddon);
+			} else if (!cfg.links && linksAddon) {
+				linksAddon.dispose();
+				linksAddon = null;
+			}
+			if (term.options.fontSize !== cfg.fontSize) {
+				term.options.fontSize = cfg.fontSize;
+				// Hidden tabs re-fit when shown again (the `active` effect below).
+				if (container.offsetWidth > 0 && container.offsetHeight > 0) sendDims();
+			}
+		};
+		applyInteractionSettings();
+		const unsubscribeInteraction = subscribeTermInteraction(applyInteractionSettings);
+
 		let ro: ResizeObserver | null = null;
 		if (typeof ResizeObserver !== "undefined") {
 			ro = new ResizeObserver(() => {
@@ -278,6 +425,14 @@ export function TermXterm({
 		return () => {
 			cancelAnimationFrame(raf);
 			onData.dispose();
+			unsubscribeInteraction();
+			selectionSub.dispose();
+			termEl?.removeEventListener("mousedown", onMouseDown, true);
+			termEl?.removeEventListener("mouseup", onMouseUp, true);
+			termEl?.removeEventListener("auxclick", onAuxClick, true);
+			termEl?.removeEventListener("contextmenu", onContextMenu, true);
+			window.removeEventListener("mouseup", onWindowMouseUp);
+			if (searchRef.current === search) searchRef.current = null;
 			termEl?.removeEventListener("touchstart", onTouchStart);
 			termEl?.removeEventListener("touchmove", onTouchMove);
 			termEl?.removeEventListener("touchend", onTouchEnd);
@@ -337,5 +492,83 @@ export function TermXterm({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [running, terminalId, exitCode]);
 
-	return <div ref={containerRef} className={`term-xterm ${active ? "" : "hidden"}`} />;
+	// Search box focus: on open and on every repeated Ctrl+Shift+F.
+	useEffect(() => {
+		if (!searchOpen) return;
+		const input = searchInputRef.current;
+		input?.focus();
+		input?.select();
+	}, [searchOpen, searchFocusTick]);
+
+	const closeSearch = () => {
+		setSearchOpen(false);
+		searchRef.current?.clearDecorations();
+		termRef.current?.term.focus();
+	};
+	const runSearch = (query: string, backwards: boolean, incremental = false) => {
+		const addon = searchRef.current;
+		if (!addon || !query) return;
+		if (backwards) addon.findPrevious(query);
+		else addon.findNext(query, { incremental });
+	};
+
+	return (
+		<>
+			<div ref={containerRef} className={`term-xterm ${active ? "" : "hidden"}`} />
+			{active && searchOpen && (
+				<div className="term-search" role="search">
+					<input
+						ref={searchInputRef}
+						className="term-search-input"
+						type="text"
+						value={searchQuery}
+						placeholder={t("termSearchPlaceholder")}
+						aria-label={t("termSearchPlaceholder")}
+						spellCheck={false}
+						onChange={(e) => {
+							setSearchQuery(e.target.value);
+							if (!e.target.value) termRef.current?.term.clearSelection();
+							runSearch(e.target.value, false, true);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Escape") {
+								e.preventDefault();
+								closeSearch();
+							} else if (e.key === "Enter") {
+								e.preventDefault();
+								runSearch(searchQuery, e.shiftKey);
+							}
+						}}
+					/>
+					<button
+						type="button"
+						className="term-search-btn"
+						title={t("termSearchPrev")}
+						aria-label={t("termSearchPrev")}
+						onClick={() => runSearch(searchQuery, true)}
+					>
+						<FiChevronUp />
+					</button>
+					<button
+						type="button"
+						className="term-search-btn"
+						title={t("termSearchNext")}
+						aria-label={t("termSearchNext")}
+						onClick={() => runSearch(searchQuery, false)}
+					>
+						<FiChevronDown />
+					</button>
+					<button
+						type="button"
+						className="term-search-btn"
+						title={t("termSearchClose")}
+						aria-label={t("termSearchClose")}
+						onClick={closeSearch}
+					>
+						<FiX />
+					</button>
+				</div>
+			)}
+		</>
+	);
 }
