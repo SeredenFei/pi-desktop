@@ -5,6 +5,7 @@ import type { ChatState, TerminalMeta } from "../use-chat";
 import type { CommandDef } from "../types";
 import { TermXterm } from "./TermXterm";
 import { useT } from "../i18n";
+import { shellBaseName, useTerminalShells } from "../terminal-shells";
 import { appSend } from "../app-globals";
 import type { TerminalOwnerKind } from "../terminal-bridge";
 
@@ -119,11 +120,14 @@ export function TerminalPanel({ chat, terminal, uiTerminalToolbar, onUiAction }:
 		setSideOpen(false);
 	};
 
-	const openShell = () =>
+	const openShell = (shell?: string) =>
 		openTab({
 			title: t("terminalTitle", { n: userTabs.length + 1 }),
 			cwd: chat.state?.cwd ?? "",
+			shell,
 		});
+	// 探测到的 shell 列表（服务端异步读 /etc/shells 等；挂载时请求一次）。
+	const shellState = useTerminalShells();
 
 	const runCommand = (cmd: CommandDef) => {
 		const title = cmd.name || cmd.command;
@@ -320,15 +324,37 @@ export function TerminalPanel({ chat, terminal, uiTerminalToolbar, onUiAction }:
 				<FiPlus />
 			</button>
 		),
+		// 一键新建仍用默认 shell；旁边的小下拉按 shell 新建（列表来自服务端探测，服务端再校验白名单）。
 		"host:term-tab-new": (
-			<button
-				type="button"
-				className="panel-new"
-				title={termLabel("host:term-tab-new", t("newTerminal"))}
-				onClick={openShell}
-			>
-				<FiPlus />
-			</button>
+			<>
+				<button
+					type="button"
+					className="panel-new"
+					title={termLabel("host:term-tab-new", t("newTerminal"))}
+					onClick={() => openShell()}
+				>
+					<FiPlus />
+				</button>
+				{shellState.shells.length > 0 && (
+					<select
+						className="panel-new panel-new-shell"
+						aria-label={t("newTerminalWithShell")}
+						title={t("newTerminalWithShell")}
+						value=""
+						onChange={(e) => {
+							if (e.target.value) openShell(e.target.value);
+						}}
+					>
+						<option value="">▾</option>
+						{shellState.shells.map((sh) => (
+							<option key={sh.path} value={sh.path}>
+								{sh.label === shellBaseName(sh.path) ? sh.label : `${sh.label} (${shellBaseName(sh.path)})`}
+								{sh.path === shellState.autoShell ? ` · ${t("terminalShellDefaultTag")}` : ""}
+							</option>
+						))}
+					</select>
+				)}
+			</>
 		),
 	};
 

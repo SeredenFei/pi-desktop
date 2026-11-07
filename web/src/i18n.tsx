@@ -1997,6 +1997,16 @@ export const zh = {
 	terminalBashIdleMs: "静默转后台阈值（毫秒）",
 	terminalBashIdleMsDesc:
 		"持久终端模式下，命令连续无输出达到该时长即不再阻塞等待，转入后台继续运行并通知 AI；0 = 一直等到命令结束（默认 15000）",
+	terminalShell: "用户终端 shell",
+	terminalShellDesc:
+		"新建用户终端时使用的 shell。自动 = 跟随系统登录 shell（passwd），其次 $SHELL，最后 bash；也可从探测到的列表里选，或手填路径/命令名（须存在于本机）。只影响之后新建的终端；AI 的 bash 终端始终是 bash",
+	terminalShellAuto: "自动（跟随登录 shell）",
+	terminalShellCustom: "自定义路径…",
+	terminalShellPath: "shell 路径",
+	terminalShellPathPlaceholder: "例如 /usr/bin/zsh 或 zsh",
+	terminalShellHint: "环境变量 PI_WEB_SHELL 优先于此设置。设置值不存在时自动回退到「自动」。",
+	newTerminalWithShell: "选择 shell 新建终端",
+	terminalShellDefaultTag: "默认",
 	terminalBashMaxForegroundMs: "前台最长等待（毫秒）",
 	terminalBashMaxForegroundMsDesc:
 		"接管模式下，命令在前台执行的总时长达到该值后，无论是否有输出，均自动转入后台继续执行并解阻模型；0 = 不限（默认 60000）",
@@ -4784,6 +4794,17 @@ export const en: Record<keyof typeof zh, string> = {
 	terminalBashIdleMs: "Silence-to-background threshold (ms)",
 	terminalBashIdleMsDesc:
 		"In persistent-terminal mode, when a command produces no output for this long, stop blocking and let it keep running in the background; the AI is notified when it finishes. 0 = always wait until completion (default 15000)",
+	terminalShell: "Terminal shell",
+	terminalShellDesc:
+		"Shell used for newly created user terminals. Auto = your login shell (passwd), then $SHELL, then bash. Pick one of the detected shells or type a path/command name (must exist on this machine). Only affects terminals created afterwards; the AI's bash terminal is always bash",
+	terminalShellAuto: "Auto (follow login shell)",
+	terminalShellCustom: "Custom path…",
+	terminalShellPath: "Shell path",
+	terminalShellPathPlaceholder: "e.g. /usr/bin/zsh or zsh",
+	terminalShellHint:
+		"The PI_WEB_SHELL environment variable takes precedence over this setting. A missing path falls back to Auto.",
+	newTerminalWithShell: "New terminal with shell",
+	terminalShellDefaultTag: "default",
 	terminalBashMaxForegroundMs: "Max foreground wait (ms)",
 	terminalBashMaxForegroundMsDesc:
 		"In terminal-takeover mode, when a command's total foreground runtime reaches this threshold, it is automatically moved to the background regardless of output activity, unblocking the model. 0 = unlimited (default 60000)",

@@ -136,6 +136,21 @@ Windows 下的伪终端销毁存在两大架构陷阱：
 
 macOS 下若服务由 launchd 拉起（`process.ppid === 1`，LaunchAgent/孤儿进程），TCC 会把相机/麦克风权限归因到 node 本身（无 App Bundle、无 Info.plist）而静默拒绝——ffmpeg 取流会卡死在取帧。`terminals.ts` 检测该场景，在客户端首次创建终端时输出提示（改 url/文件源，或在自己已授权的终端里前台运行）。
 
-## Windows shell 解析
+## 终端 shell 解析
 
-`terminals.ts` 的 `resolveShell()` 每次创建终端时解析，优先 bash——`PI_WEB_SHELL` 显式 → `$SHELL` → Git Bash（ProgramFiles）→ busybox 兜底（`~/.pi-web/bin/bash.exe`，`ensure-bash.ts` 无 Git Bash 时自动下载 busybox-w32）→ `$COMSPEC` → powershell。与 SDK bash 工具（Git Bash / PATH 上的 bash）保持一致，避免 PowerShell/bash 混用挂死。
+`server/terminal-shell.ts` 是纯函数 + 异步探测（可注入 env / `os.userInfo().shell` / exists，单测 `tests/unit/terminal-shell.test.ts`）；`terminals.ts` 的 `resolveShell()` 每次建用户终端时调用它。优先级：
+
+1. `PI_WEB_SHELL`（显式覆盖，三端都认）
+2. 设置 `terminalShell`（`""` = 自动；绝对路径或 PATH 上的命令名，**磁盘上存在才用**，不存在静默回退）
+3. Windows（原顺序不变）：`$SHELL`（存在）→ Git Bash（ProgramFiles）→ busybox 兜底（`~/.pi-web/bin/bash.exe`，`ensure-bash.ts` 无 Git Bash 时自动下载）→ `$COMSPEC` → powershell。与 SDK bash 工具保持一致，避免 PowerShell/bash 混用挂死。
+4. POSIX：passwd 登录 shell（`os.userInfo().shell`，跳过 nologin/false 等假 shell）→ `$SHELL` → bash。桌面壳 / launchd / systemd 拉起的服务常拿不到真实 `$SHELL`（macOS GUI 尤甚），所以登录 shell 排在 `$SHELL` 前。
+
+参数：bash `-i`（不加 `-l`：会改读 `~/.bash_profile` 而跳过 `~/.bashrc`）；zsh / fish `-l -i`（加载 `.zprofile` 里的 PATH，且是 `-i` 的超集）；其它（sh、cmd、powershell、wsl.exe…）无参数。
+
+**不受影响**：`resolveBashShell()`（ai-bash 永远 bash）与远程 `ssh://` 分支。
+
+### 可选 shell 探测与按 shell 新建
+
+- 客户端发 `list_terminal_shells`，服务端回 `terminal_shells { shells, autoShell }`：POSIX 异步读 `/etc/shells` 并过滤可执行项（usrmerge 同文件去重）；Windows 列 Git Bash / pwsh / Windows PowerShell / cmd / wsl.exe 中存在的候选。全程 `fs.promises`，禁同步子进程；30s 缓存。
+- `terminal_create.shell`（仅用户终端；`agentBash` 忽略）：`TerminalManager.create()` 在 spawn 前用 `validateRequestedShell` 校验——必须在探测列表内或**恰好等于**设置值，否则 `fail()`（带参数/拼接命令的字符串一律拒绝，不经 shell 解析）。处理器先 `await listAvailableShells()` 暖缓存再建。
+- 设置面板「用户终端 shell」（与终端接管 bash 同组）：自动 + 探测列表 + 手填路径。`terminalShell` 机器相关，**不进预设**（`preset-share.test.ts` 编译期守卫显式排除）。

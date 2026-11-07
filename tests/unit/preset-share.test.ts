@@ -78,11 +78,15 @@ import type { ClientSettings } from "../../server/client-state.js";
 
 /**
  * 编译期守卫：`ClientSettings` 的每个字段都必须在 `preset-fields.ts` 里登记。
+ * 例外：`_promptPluginDevConfigured`（内部标记）与 `terminalShell`（机器相关的可执行文件
+ * 路径，分享出去既无意义又会让导入方被指到陌生可执行文件）。
  * 两者对不上时 `Exclude<...>` 不是 `never`，`Assert<true>` 立刻报类型错误。
  */
 type Assert<T extends true> = T;
 export type PresetFieldsCoverClientSettings = Assert<
-	Exclude<keyof ClientSettings, PresetFieldName | "_promptPluginDevConfigured"> extends never ? true : false
+	Exclude<keyof ClientSettings, PresetFieldName | "_promptPluginDevConfigured" | "terminalShell"> extends never
+		? true
+		: false
 >;
 
 const SETTINGS = {

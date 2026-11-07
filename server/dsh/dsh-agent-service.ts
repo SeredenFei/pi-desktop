@@ -548,6 +548,7 @@ export class DshClientSession {
 			() => this.cwd,
 			() => this.getLang(),
 			"client",
+			() => this.getTerminalShellSetting(),
 		);
 	}
 
@@ -1848,6 +1849,10 @@ export class DshClientSession {
 				});
 			}
 		}
+	}
+
+	getTerminalShellSetting(): string {
+		return this.stateStore?.getSettingsSnapshot(this.clientId).terminalShell ?? "";
 	}
 
 	getUserTerminalManager(): TerminalManager {
@@ -4152,6 +4157,7 @@ export class DshClientSession {
 			disabledAgentTools: [],
 			// DSH has no plugin host: no plugin AI tools exist here; empty keeps protocol complete.
 			disabledPluginTools: [],
+			terminalShell: this.getTerminalShellSetting(),
 			terminalToolsEnabled: this.settings.terminalToolsEnabled,
 			terminalBash: this.settings.terminalBash,
 			terminalBashIdleMs: this.settings.terminalBashIdleMs,

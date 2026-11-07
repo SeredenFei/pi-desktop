@@ -15,6 +15,7 @@ import { normalizeSoftCapByModel, normalizeSoftCapTokens } from "./soft-cap.js";
 import { deriveLegacy, legacyToDisabled, normalizeDisabledAgentTools } from "./tool-manager.js";
 import { normalizeToolPromptOverrides, type ToolPromptOverrideMap } from "./tool-prompt-overrides.js";
 import { UI_SLOTS } from "./plugin-ui-slots.js";
+import { normalizeTerminalShell } from "./terminal-shell.js";
 import { DEFAULT_PROMPT_DISABLED } from "./prompt-composer.js";
 import type { EngineId, QueueMode, UiAlign, UiLayoutPrefs, UiSlotId } from "./protocol.js";
 
@@ -375,6 +376,9 @@ export interface ClientSettings {
 	terminalBashIdleMs: number;
 	/** 接管模式下 bash 前台最长等待毫秒（默认 60000 即 60 秒；0 = 不限）。 */
 	terminalBashMaxForegroundMs: number;
+	/** 用户终端使用的 shell（绝对路径或 PATH 上的命令名；"" = 自动：跟随登录 shell）。
+	 *  只影响用户终端；ai-bash 永远是 bash。机器相关，不进预设。 */
+	terminalShell: string;
 	/** 工具执行看门狗超时（毫秒，默认 20 分钟；0 = 禁用看门狗）。
 	 *  单个工具调用的最长执行时长，超时自动 abort 会话以防挂死。
 	 *  若工具调用显式指定了更长超时（如 bash timeout），看门狗将自动顺延。
@@ -1245,6 +1249,7 @@ export class ClientStateStore {
 			terminalBash: stored?.terminalBash ?? false,
 			terminalBashIdleMs: stored?.terminalBashIdleMs ?? 15_000,
 			terminalBashMaxForegroundMs: stored?.terminalBashMaxForegroundMs ?? 60_000,
+			terminalShell: normalizeTerminalShell(stored?.terminalShell),
 			toolWatchdogTimeoutMs: normalizeToolWatchdogTimeoutMs(stored?.toolWatchdogTimeoutMs),
 			readDirEnabled: stored?.readDirEnabled ?? true,
 			bgAutoCleanupMin: normalizeBgCleanupMinutes(stored?.bgAutoCleanupMin),
@@ -1354,6 +1359,7 @@ export class ClientStateStore {
 			terminalBash: settings.terminalBash ?? cur.terminalBash ?? false,
 			terminalBashIdleMs: settings.terminalBashIdleMs ?? cur.terminalBashIdleMs ?? 15_000,
 			terminalBashMaxForegroundMs: settings.terminalBashMaxForegroundMs ?? cur.terminalBashMaxForegroundMs ?? 60_000,
+			terminalShell: normalizeTerminalShell(settings.terminalShell ?? cur.terminalShell),
 			toolWatchdogTimeoutMs: normalizeToolWatchdogTimeoutMs(
 				settings.toolWatchdogTimeoutMs ?? cur.toolWatchdogTimeoutMs ?? DEFAULT_TOOL_WATCHDOG_TIMEOUT_MS,
 			),

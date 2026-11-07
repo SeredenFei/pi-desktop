@@ -699,6 +699,15 @@
 		color: var(--text);
 		border-color: var(--accent);
 	}
+	/* 「按 shell 新建」小下拉：沿用 .panel-new 观感，窄宽 + 不撑破工具条。 */
+	.panel-new-shell {
+		min-width: 0;
+		max-width: 64px;
+		padding: 3px 2px;
+		margin-left: 4px;
+		text-overflow: ellipsis;
+		appearance: auto;
+	}
 
 	/* Floating refresh button */
 	.panel-fab {

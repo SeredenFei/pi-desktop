@@ -12,6 +12,7 @@ import type { DispatchSession } from "./index.js";
 import { SchedulerValidationError, type SchedulerStore } from "./scheduler-tasks.js";
 import type { RemoteSshService } from "./remote-ssh-service.js";
 import { normalizePathKey } from "./client-state.js";
+import { listAvailableShells, pickUserShell, systemShellDeps } from "./terminal-shell.js";
 
 /** 文件与工作区相关操作 */
 export function handleFileMessage(msg: ClientMessage, cs: DispatchSession): boolean {
@@ -368,7 +369,11 @@ export function handleModelAndProviderMessage(msg: ClientMessage, cs: DispatchSe
 }
 
 /** 终端 (PTY) 管理与输入控制 */
-export function handleTerminalMessage(msg: ClientMessage, cs: DispatchSession): boolean {
+export function handleTerminalMessage(
+	msg: ClientMessage,
+	cs: DispatchSession,
+	send?: (msg: ServerMessage) => void,
+): boolean {
 	switch (msg.type) {
 		case "terminal_attach": {
 			const tm = cs.findTerminalManager
@@ -388,20 +393,35 @@ export function handleTerminalMessage(msg: ClientMessage, cs: DispatchSession): 
 				? cs.getTerminalManager(msg.conversationId)
 				: (cs.getUserTerminalManager?.() ?? cs.getTerminalManager(msg.conversationId));
 			if (tm) {
-				const createOpts =
-					msg.locale !== undefined || msg.agentBash !== undefined
-						? { locale: msg.locale, agentBash: msg.agentBash }
-						: undefined;
-				tm.create(
-					msg.terminalId,
-					msg.cwd,
-					msg.cols,
-					msg.rows,
-					cs.getTerminalCwd(msg.conversationId),
-					msg.title,
-					createOpts,
-				);
+				// 按 shell 新建只对用户终端开放；ai-bash 永远 bash，忽略该字段。
+				const shell = !isAgentBash && msg.shell ? msg.shell : undefined;
+				const create = () => {
+					const createOpts =
+						msg.locale !== undefined || msg.agentBash !== undefined || shell
+							? { locale: msg.locale, agentBash: msg.agentBash, shell }
+							: undefined;
+					tm.create(
+						msg.terminalId,
+						msg.cwd,
+						msg.cols,
+						msg.rows,
+						cs.getTerminalCwd(msg.conversationId),
+						msg.title,
+						createOpts,
+					);
+				};
+				// create() 同步校验 shell 白名单（探测缓存），先异步暖缓存再建。
+				if (shell) void listAvailableShells().then(create, create);
+				else create();
 			}
+			return true;
+		}
+		case "list_terminal_shells": {
+			// "auto" = what an empty setting resolves to right now (PI_WEB_SHELL > login shell > $SHELL > bash).
+			const autoShell = pickUserShell("", systemShellDeps()).shell;
+			const reply = (shells: Array<{ path: string; label: string }>) =>
+				send?.({ type: "terminal_shells", shells, autoShell });
+			void listAvailableShells().then(reply, () => reply([]));
 			return true;
 		}
 		case "terminal_input": {
@@ -716,6 +736,7 @@ export function handleSettingsMessage(
 				terminalBash: msg.terminalBash,
 				terminalBashIdleMs: msg.terminalBashIdleMs,
 				terminalBashMaxForegroundMs: (msg as { terminalBashMaxForegroundMs?: number }).terminalBashMaxForegroundMs,
+				terminalShell: (msg as { terminalShell?: string }).terminalShell,
 				toolWatchdogTimeoutMs: (msg as { toolWatchdogTimeoutMs?: number }).toolWatchdogTimeoutMs,
 				readDirEnabled: (msg as { readDirEnabled?: boolean }).readDirEnabled,
 				bgAutoCleanupMin: (msg as { bgAutoCleanupMin?: number }).bgAutoCleanupMin,

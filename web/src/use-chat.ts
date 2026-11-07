@@ -79,6 +79,7 @@ import {
 } from "./question-answer-relay";
 import { emitTuiOverlayRender, resetTuiOverlayRender } from "./tui-overlay-bridge";
 import { setAppGlobals, setAppSend } from "./app-globals";
+import { setTerminalShells } from "./terminal-shells";
 import { currentUiLocale, UI_LOCALE_EVENT } from "./ui-locale.js";
 // 工具定义说明弹窗（工具卡右键 → 「显示工具详细信息」）：应答直接回模块级 store，
 // 不进 ChatState（弹窗挂在 App 上，消息列表里几十张卡片不必为此各拿一份数据）。
@@ -148,6 +149,8 @@ export interface Notice {
  * (via the terminal bridge) — this is just the tab metadata. */
 export interface TerminalMeta extends TerminalInfo {
 	conversationId: string;
+	/** 仅新建时用：按此 shell 开（服务端校验白名单；缺省 = 默认 shell）。不回显、不持久化。 */
+	shell?: string;
 }
 
 /** 插件后台作业（安装/更新/卸载）的实时状态（issue #152）。
@@ -1912,7 +1915,10 @@ export function isSessionMatchingProject(sessionPath?: string | null, projectPat
 	if (!normS.includes("/")) return true;
 
 	// SDK session slug 完整匹配：如 "--e--t--"、"--c--users-c-desktop--" 或 POSIX "--users-sereden-pi-desktop--"
-	const fullSlug = normP.replace(/^\/+/, "").replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+	const fullSlug = normP
+		.replace(/^\/+/, "")
+		.replace(/[^a-zA-Z0-9]/g, "-")
+		.toLowerCase();
 	if (fullSlug && normS.includes(`--${fullSlug}--`)) return true;
 
 	// 若会话路径位于标准 SDK sessions 子目录 `/--<slug>--/` 下，则以该 `<slug>` 为唯一权威归属依据，
@@ -3024,6 +3030,9 @@ export function useChat() {
 						terminals: msg.terminals,
 					});
 					break;
+				case "terminal_shells":
+					setTerminalShells(msg);
+					break;
 				case "commands":
 					dispatch({
 						type: "commands",
@@ -3481,6 +3490,7 @@ export function useChat() {
 						title: meta.title,
 						cwd: meta.cwd,
 						agentBash: meta.agentBash,
+						shell: meta.shell || undefined,
 						locale: readUiLocale(),
 					});
 			if (sent) dispatch({ type: "terminal_add", meta: { ...meta, ownerKind } });

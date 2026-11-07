@@ -1108,6 +1108,10 @@ export class ClientSession {
 		return this.userTerminals;
 	}
 
+	getTerminalShellSetting(): string {
+		return this.settingsSvc.current.terminalShell ?? "";
+	}
+
 	findTerminalManager(
 		terminalId: string,
 		conversationId?: string,
@@ -1155,6 +1159,7 @@ export class ClientSession {
 			() => this.cwd,
 			() => this.getLang(),
 			"client",
+			() => this.getTerminalShellSetting(),
 		);
 		return mgr;
 	}
@@ -1165,6 +1170,8 @@ export class ClientSession {
 			cwd,
 			// issue #91：终端输入错误按客户端 UI 语言出中英（英文默认）。
 			() => this.getLang(),
+			"conversation",
+			() => this.getTerminalShellSetting(),
 		);
 		// 终端活力检测：AI 触碰过的终端静默 ≥ 阈值（PI_WEB_TERMINAL_IDLE_MS，
 		// 默认 15s）且该对话正在运行时，注入一条 steer 消息唤醒 AI 去检查。
@@ -9410,6 +9417,7 @@ export class ClientSession {
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
 		terminalBashMaxForegroundMs?: number;
+		terminalShell?: string;
 		toolWatchdogTimeoutMs?: number;
 		/** read 工具读目录开关（默认开；见 server/read-tool.ts）。 */
 		readDirEnabled?: boolean;

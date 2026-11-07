@@ -2377,6 +2377,7 @@ export class UniversalSession implements DispatchSession {
 			terminalBash: s?.terminalBash ?? true,
 			terminalBashIdleMs: s?.terminalBashIdleMs ?? 3000,
 			terminalBashMaxForegroundMs: s?.terminalBashMaxForegroundMs ?? 15000,
+			terminalShell: s?.terminalShell ?? "",
 			toolWatchdogTimeoutMs: s?.toolWatchdogTimeoutMs ?? 1200000,
 			readDirEnabled: true,
 			bgAutoCleanupMin: s?.bgAutoCleanupMin ?? 0,

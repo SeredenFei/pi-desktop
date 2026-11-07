@@ -1683,7 +1683,7 @@ export interface TerminalManagerLike {
 		rows: number,
 		fallbackCwd: string,
 		title?: string,
-		opts?: { forceBash?: boolean; locale?: string; agentBash?: boolean },
+		opts?: { forceBash?: boolean; locale?: string; agentBash?: boolean; shell?: string },
 	): void;
 	input(id: string, data: string): void;
 	resize(id: string, cols: number, rows: number): void;
@@ -1850,6 +1850,8 @@ export interface DispatchSession {
 	abortEnrichModels(reqId?: number): void;
 	getTerminalManager(conversationId?: string): TerminalManagerLike | undefined;
 	getUserTerminalManager?(): TerminalManagerLike | undefined;
+	/** Settings `terminalShell` ("" = auto) — used to label what "auto" resolves to. */
+	getTerminalShellSetting?(): string;
 	findTerminalManager?(
 		terminalId: string,
 		conversationId?: string,
@@ -1892,6 +1894,7 @@ export interface DispatchSession {
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
 		terminalBashMaxForegroundMs?: number;
+		terminalShell?: string;
 		editSoftEnabled?: boolean;
 		thinkingWrap?: boolean;
 		toolsWrap?: boolean;
@@ -3629,7 +3632,7 @@ wss.on("connection", (ws) => {
 			if (handleBgServerMessage(msg, cs)) return;
 			if (handlePresetAndDshMessage(msg, cs)) return;
 			if (handleModelAndProviderMessage(msg, cs)) return;
-			if (handleTerminalMessage(msg, cs)) return;
+			if (handleTerminalMessage(msg, cs, send)) return;
 			if (handleSessionLifecycleMessage(msg, cs, send, service, clientId)) return;
 			if (handlePlanAndGoalMessage(msg, cs)) return;
 			if (handleScheduleMessage(msg, scheduler, send)) return;

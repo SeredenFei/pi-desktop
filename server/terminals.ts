@@ -30,6 +30,13 @@ import { BASH_DESCRIPTION, BASH_PARAMETERS, BASH_PROMPT_GUIDELINES, BASH_PROMPT_
 import { pick, type ServerLang } from "./i18n.js";
 import { armDelay } from "./plugin-schedule.js";
 import {
+	cachedShellList,
+	pickUserShell,
+	shellArgsFor,
+	systemShellDeps,
+	validateRequestedShell,
+} from "./terminal-shell.js";
+import {
 	getGlobalRemoteSshService,
 	isRemoteWorkspaceUri,
 	parseRemoteWorkspaceUri,
@@ -688,46 +695,23 @@ function truncateMiddle(text: string, max = 30_000): string {
 	return `${text.slice(0, head)}\n…（中间省略 ${text.length - max} 字符）…\n${text.slice(-tail)}`;
 }
 
-/** `-i` makes bash interactive; cmd.exe / powershell.exe are interactive on their own. */
-function bashArgs(shell: string): string[] {
-	return /[\\/]bash(\.exe)?$/i.test(shell) ? ["-i"] : [];
-}
-
 /**
- * Interactive shell for PTYs.
- * - Windows: prefer bash — it matches the SDK's bash tool, so the agent and
- *   the terminal speak the same shell language (no more PowerShell/bash
- *   混用 that leaves heredocs / `&&` / `<<` hanging or erroring). Order:
+ * Interactive shell for user PTYs (pure priority logic: `terminal-shell.ts`).
  *   1. PI_WEB_SHELL (explicit override)
- *   2. $SHELL when it exists on disk (user launched from a Git Bash session)
- *   3. Git Bash install paths (ProgramFiles / ProgramFiles(x86))
- *   4. busybox-w32 fallback in <home>/.pi-web/bin/bash.exe (ensure-bash.ts
- *      downloads it automatically when 2–3 are absent)
- *   5. $COMSPEC (cmd.exe — always set)
- *   6. powershell.exe (last resort)
- * - POSIX: the user's login shell, falling back to bash.
+ *   2. settings `terminalShell` (only when it exists on disk)
+ *   3. Windows (unchanged order): $SHELL when it exists (user launched from a
+ *      Git Bash session) → Git Bash (ProgramFiles) → busybox-w32 fallback in
+ *      <home>/.pi-web/bin/bash.exe (ensure-bash.ts downloads it when 3 is
+ *      absent) → $COMSPEC → powershell.exe. bash first matches the SDK's bash
+ *      tool, so the agent and the terminal speak the same shell language.
+ *   4. POSIX: passwd login shell (`os.userInfo().shell`) → $SHELL → bash. The
+ *      service process often lacks the user's real $SHELL (launchd/systemd/
+ *      desktop shell), which is why zsh users used to get bash.
  * Resolved per terminal spawn (not at module load) so a busybox download that
  * finishes after startup is picked up by the next terminal.
  */
-function resolveShell(): { shell: string; args: string[] } {
-	if (isWindows) {
-		const explicit = process.env.PI_WEB_SHELL;
-		if (explicit) return { shell: explicit, args: bashArgs(explicit) };
-		const she = process.env.SHELL;
-		if (she && existsSync(she)) return { shell: she, args: bashArgs(she) };
-		const pf = process.env.ProgramFiles;
-		const pf86 = process.env["ProgramFiles(x86)"];
-		for (const cand of [
-			pf ? join(pf, "Git", "bin", "bash.exe") : "",
-			pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
-		]) {
-			if (cand && existsSync(cand)) return { shell: cand, args: ["-i"] };
-		}
-		const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
-		if (existsSync(busybox)) return { shell: busybox, args: ["-i"] };
-		return { shell: process.env.COMSPEC || "powershell.exe", args: [] };
-	}
-	return { shell: process.env.SHELL || "bash", args: ["-i"] };
+function resolveShell(configured = ""): { shell: string; args: string[] } {
+	return pickUserShell(configured, systemShellDeps());
 }
 
 /**
@@ -1072,6 +1056,8 @@ export class TerminalManager {
 		// issue #91：按键/输入校验错误按客户端 UI 语言出中英（英文默认）。
 		private readonly lang?: () => ServerLang,
 		readonly ownerKind: "client" | "conversation" = "conversation",
+		/** Settings `terminalShell` ("" = auto). Read per spawn so a settings change applies to the next terminal. */
+		private readonly shellPref: () => string = () => "",
 	) {
 		this.emit = this.ownedEmit(emit);
 	}
@@ -1112,7 +1098,7 @@ export class TerminalManager {
 		rows: number,
 		fallbackCwd: string,
 		title?: string,
-		opts?: { forceBash?: boolean; agentBash?: boolean; locale?: string },
+		opts?: { forceBash?: boolean; agentBash?: boolean; locale?: string; shell?: string },
 	): TerminalInfo | null {
 		const valid = this.validateId(id);
 		if (valid) {
@@ -1145,6 +1131,17 @@ export class TerminalManager {
 			);
 			return null;
 		}
+		// Per-terminal shell from the wire: only detected shells or the saved setting
+		// may be spawned (the caller warms the detection cache first).
+		let requestedShell: string | undefined;
+		if (opts?.shell && !opts.forceBash) {
+			const ok = validateRequestedShell(opts.shell, this.shellPref(), cachedShellList());
+			if (!ok) {
+				this.fail(id, `不允许的 shell：${opts.shell}`, `Shell not allowed: ${opts.shell}`);
+				return null;
+			}
+			requestedShell = ok;
+		}
 		if (
 			this.spawnShell(
 				id,
@@ -1156,6 +1153,7 @@ export class TerminalManager {
 				opts?.forceBash,
 				priorAgentBash,
 				opts?.locale,
+				requestedShell,
 			)
 		) {
 			this.maybeEmitTccHint(id);
@@ -1272,6 +1270,13 @@ export class TerminalManager {
 		}
 	}
 
+	/** ai-bash is ALWAYS bash; user terminals use the validated per-terminal shell, else the resolved default. */
+	private pickShell(forceBash: boolean | undefined, requestedShell: string | undefined) {
+		if (forceBash) return resolveBashShell();
+		if (requestedShell) return { shell: requestedShell, args: shellArgsFor(requestedShell) };
+		return resolveShell(this.shellPref());
+	}
+
 	/** Spawn the user's shell as a PTY. Returns false when the spawn failed. */
 	private spawnShell(
 		id: string,
@@ -1283,6 +1288,7 @@ export class TerminalManager {
 		forceBash?: boolean,
 		agentBash = false,
 		locale?: string,
+		requestedShell?: string,
 	): boolean {
 		let abs = cwd;
 		let shell: string;
@@ -1307,7 +1313,7 @@ export class TerminalManager {
 			} else {
 				if (!abs) abs = homedir();
 				else if (!isAbsolute(abs)) abs = resolve(abs);
-				const s = forceBash ? resolveBashShell() : resolveShell();
+				const s = this.pickShell(forceBash, requestedShell);
 				shell = s.shell;
 				args = s.args;
 			}
@@ -1323,7 +1329,7 @@ export class TerminalManager {
 				this.fail(id, `无法访问终端目录：${abs}`, `Cannot access terminal directory: ${abs}`);
 				return false;
 			}
-			const s = forceBash ? resolveBashShell() : resolveShell();
+			const s = this.pickShell(forceBash, requestedShell);
 			shell = s.shell;
 			args = s.args;
 		}

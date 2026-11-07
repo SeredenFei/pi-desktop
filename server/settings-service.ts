@@ -55,6 +55,7 @@ import type { ApprovalRulesStore } from "./approval-rules.js";
 import { deriveLegacy, foldLegacyIntoDisabled, normalizeDisabledAgentTools } from "./tool-manager.js";
 import { normalizeToolPromptOverrides } from "./tool-prompt-overrides.js";
 import { resolveServerLang, type ServerLang } from "./i18n.js";
+import { normalizeTerminalShell } from "./terminal-shell.js";
 import {
 	exportPresetVia,
 	importPresetFromUrlVia,
@@ -559,6 +560,7 @@ export class SettingsService {
 				terminalBash: this.settings.terminalBash,
 				terminalBashIdleMs: this.settings.terminalBashIdleMs,
 				terminalBashMaxForegroundMs: this.settings.terminalBashMaxForegroundMs,
+				terminalShell: this.settings.terminalShell ?? "",
 				toolWatchdogTimeoutMs: this.settings.toolWatchdogTimeoutMs,
 				readDirEnabled: this.settings.readDirEnabled !== false,
 				bgAutoCleanupMin: normalizeBgCleanupMinutes(this.settings.bgAutoCleanupMin),
@@ -711,6 +713,7 @@ export class SettingsService {
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
 		terminalBashMaxForegroundMs?: number;
+		terminalShell?: string;
 		toolWatchdogTimeoutMs?: number;
 		/** read 工具读目录开关（默认开；见 server/read-tool.ts）。运行时无需重载，
 		 *  覆盖定义每次调用实时读取。 */
@@ -880,6 +883,9 @@ export class SettingsService {
 		}
 		if (partial.terminalBashMaxForegroundMs !== undefined) {
 			next.terminalBashMaxForegroundMs = Math.max(0, Math.floor(partial.terminalBashMaxForegroundMs) || 0);
+		}
+		if (partial.terminalShell !== undefined) {
+			next.terminalShell = normalizeTerminalShell(partial.terminalShell);
 		}
 		if (partial.toolWatchdogTimeoutMs !== undefined) {
 			next.toolWatchdogTimeoutMs = normalizeToolWatchdogTimeoutMs(partial.toolWatchdogTimeoutMs);

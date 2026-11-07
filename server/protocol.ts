@@ -1297,7 +1297,12 @@ export type ClientMessage =
 			 *  terminals and blew the 16-slot cap). Absent = false; the server also
 			 *  inherits the prior value from history for old clients. */
 			agentBash?: boolean;
+			/** Optional shell for THIS terminal (user terminals only). The server only
+			 *  accepts a detected shell (`terminal_shells`) or the saved `terminalShell`. */
+			shell?: string;
 	  }
+	/** Ask for the shells installed on the host (settings panel / new-terminal dropdown). */
+	| { type: "list_terminal_shells" }
 	/** Attach an existing display without spawning or restarting its process. */
 	| {
 			type: "terminal_attach";
@@ -1739,6 +1744,8 @@ export type ClientMessage =
 			terminalBashIdleMs?: number;
 			/** 终端接管 bash 前台最长等待毫秒（0 = 不限；达到后无论是否有输出均自动转后台）。 */
 			terminalBashMaxForegroundMs?: number;
+			/** 用户终端 shell（绝对路径或命令名；"" = 自动）。 */
+			terminalShell?: string;
 			/** 工具执行看门狗超时（毫秒，0 = 禁用；默认 20 分钟即 1200000）。 */
 			toolWatchdogTimeoutMs?: number;
 			/** read 工具读目录开关（默认开）。开 → read(目录路径) 列出目录条目，
@@ -4025,6 +4032,8 @@ export interface UiSettingsState {
 	terminalBashIdleMs: number;
 	/** 接管模式下 bash 前台最长等待毫秒数（0 = 不限；达到后自动转后台）。 */
 	terminalBashMaxForegroundMs: number;
+	/** 用户终端 shell（绝对路径或命令名；"" = 自动，跟随登录 shell）。 */
+	terminalShell: string;
 	/** 工具执行看门狗超时毫秒数（0 = 禁用；默认 20 分钟即 1200000）。 */
 	toolWatchdogTimeoutMs: number;
 	/** read 工具读目录开关（默认开）：开 → read(目录路径) 列出目录条目（见
@@ -4460,6 +4469,8 @@ export type ServerMessage =
 			ownerKind?: "client" | "conversation";
 	  }
 	| { type: "terminal_list"; conversationId?: string; terminals: TerminalInfo[] }
+	/** Reply to `list_terminal_shells`: detected shells + what "auto" resolves to right now. */
+	| { type: "terminal_shells"; shells: Array<{ path: string; label: string }>; autoShell: string }
 	// -- command list (.pi/commands.json) ------------------------------------
 	| { type: "commands"; commands: CommandDef[]; path: string }
 	/** The slash-command catalog for the chat input (builtin + extension +

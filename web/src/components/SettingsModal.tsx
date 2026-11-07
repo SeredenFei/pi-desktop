@@ -127,6 +127,7 @@ import type {
 } from "../use-chat";
 import { PresetShareModal, type PresetShareTab } from "./PresetShareModal";
 import { appSend, useAppGlobals, useEngineStatuses } from "../app-globals";
+import { shellBaseName, useTerminalShells } from "../terminal-shells";
 import { countPluginPhases, pluginPhase, type PluginPhase } from "../plugin-phase";
 import {
 	PLUGIN_LOG_LEVELS,
@@ -476,6 +477,68 @@ function FieldRow({
 	);
 }
 
+/** 用户终端 shell：自动 + 服务端探测列表 + 手填路径。ai-bash 永远是 bash，不受此项影响。 */
+function TerminalShellField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+	const t = useT();
+	const { shells, autoShell } = useTerminalShells();
+	const known = value === "" || shells.some((s) => s.path === value);
+	const [custom, setCustom] = useState(!known);
+	const [draft, setDraft] = useState(value);
+	useEffect(() => setDraft(value), [value]);
+	// 列表晚于设置到达时，已保存的值若在列表里就退出手填模式；不在列表里则保持手填。
+	useEffect(() => setCustom(value !== "" && !shells.some((s) => s.path === value)), [value, shells]);
+	const showCustom = custom || (!known && value !== "");
+	const autoLabel = autoShell ? `${t("terminalShellAuto")} (${shellBaseName(autoShell)})` : t("terminalShellAuto");
+	return (
+		<>
+			<FieldRow label={t("terminalShell")} tip={t("terminalShellDesc")} htmlFor="term-shell-select">
+				<select
+					id="term-shell-select"
+					className="set-select"
+					value={showCustom ? "__custom__" : value}
+					onChange={(e) => {
+						const v = e.target.value;
+						if (v === "__custom__") setCustom(true);
+						else {
+							setCustom(false);
+							if (v !== value) onChange(v);
+						}
+					}}
+				>
+					<option value="">{autoLabel}</option>
+					{shells.map((s) => (
+						<option key={s.path} value={s.path}>
+							{s.label === shellBaseName(s.path) ? s.path : `${s.label} — ${s.path}`}
+						</option>
+					))}
+					<option value="__custom__">{t("terminalShellCustom")}</option>
+				</select>
+			</FieldRow>
+			{showCustom && (
+				<FieldRow label={t("terminalShellPath")} htmlFor="term-shell-path">
+					<input
+						id="term-shell-path"
+						className="set-input"
+						type="text"
+						spellCheck={false}
+						placeholder={t("terminalShellPathPlaceholder")}
+						value={draft}
+						onChange={(e) => setDraft(e.target.value)}
+						onBlur={() => {
+							const v = draft.trim();
+							if (v !== value) onChange(v);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+						}}
+					/>
+				</FieldRow>
+			)}
+			<p className="set-hint">{t("terminalShellHint")}</p>
+		</>
+	);
+}
+
 /** 通用提示词覆盖区块（SCM commit msg、计划模式、视觉桥等共用）：包含模式选择、草稿防抖与默认值契约。 */
 function PromptOverrideEditor({
 	mode,
@@ -645,6 +708,8 @@ interface SettingsPatch {
 	terminalBash?: boolean;
 	terminalBashIdleMs?: number;
 	terminalBashMaxForegroundMs?: number;
+	/** 用户终端 shell（绝对路径或命令名；"" = 自动，跟随登录 shell）。ai-bash 不受影响。 */
+	terminalShell?: string;
 	toolWatchdogTimeoutMs?: number;
 	/** read 工具读目录开关（默认开；行为开关，live 生效无需 reload，见 server/read-tool.ts）。 */
 	readDirEnabled?: boolean;
@@ -3872,6 +3937,10 @@ export function SettingsModal({
 										</FieldRow>
 									</>
 								)}
+								<TerminalShellField
+									value={settings.terminalShell ?? ""}
+									onChange={(v) => setPartial({ terminalShell: v })}
+								/>
 								<div className="set-field-label">
 									{t("toolsSectionSubagent")} <HintTip text={t("toolsSubagentDepHint")} />
 								</div>
