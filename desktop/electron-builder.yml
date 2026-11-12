@@ -20,10 +20,17 @@ extraMetadata:
 # asar:false：server 以 ELECTRON_RUN_AS_NODE 跑在纯 Node 语义下，
 # 且 node-pty 的 .node 原生模块本来就进不了 asar，直接关闭最省心。
 asar: false
-# 关掉 electron-builder 的 @electron/rebuild：node-pty 1.1.0 是 N-API 预编译
-# （prebuilds/，在 ELECTRON_RUN_AS_NODE 下实测 require 成功，ABI 141/149 通吃），
-# 不需要按 Electron ABI 重编；否则打包时会强依赖本机 Visual Studio（node-gyp）。
+# 关掉 electron-builder 的 @electron/rebuild：node-pty 1.1.0 基于 N-API（跨 Node/Electron ABI 通用，
+# 无需按 Electron ABI 重编）。注意：node-pty 仅内置 darwin-* / win32-* 的 prebuilds/，Linux 无预编译包，
+# pty.node 会在 `npm ci` 时链接构建机 glibc 现编 —— 通过下方三段生命周期钩子自动保证：
+#   1) beforePack：若宿主现编原生模块超过 GLIBC 2.35 / GLIBCXX 3.4.30（如 Ubuntu 26.04 runner），
+#      自动在 ubuntu:22.04 容器内重编 node-pty / ssh2 / cpu-features；
+#   2) afterPack：静态扫描 linux-unpacked 全部 .node 符号上限；
+#   3) afterAllArtifactBuild：在 ubuntu:22.04 容器（Xvfb）中冷启动最终 .AppImage 并实测 node-pty 终端读写。
 npmRebuild: false
+beforePack: ./scripts/electron-builder-hooks.mjs
+afterPack: ./scripts/electron-builder-hooks.mjs
+afterAllArtifactBuild: ./scripts/electron-builder-hooks.mjs
 # 图标：直接复用网页版的 PWA 图标（1024×1024 PNG，electron-builder 自己转 .ico/.icns）。
 # 不放进 files：图标是打包时烘进 exe/App 里的，运行时不需要这个文件。
 # 更新 feed（issue #180）：显式声明 github publish，`app-update.yml` 不再是
@@ -32,7 +39,7 @@ npmRebuild: false
 # 避免 electron-builder 直推与 release-notes.yml 打架），feed 文件照常生成。
 publish:
   provider: github
-  owner: feifeifei527
+  owner: SeredenFei
   repo: pi-desktop
 win:
   target:

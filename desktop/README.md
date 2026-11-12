@@ -123,7 +123,7 @@ Electron 主进程（desktop/main.ts）
 - [main.ts](./main.ts) 是主进程入口，[preload.cts](./preload.cts) 提供窗口和更新 IPC，[startup.ts](./startup.ts) 负责启动辅助逻辑，[portable.ts](./portable.ts) 负责便携路径探测与环境注入。
 - ESM 入口不能顶层 `await app.whenReady()`：Electron 等入口求值结束才发 ready，会互相等待。保持 `app.whenReady().then(...)` 的启动方式。
 - [electron-builder.yml](./electron-builder.yml) 用 `extraMetadata.main` 覆盖根包的 CLI 入口为 `dist/desktop/main.js`；`asar: false` 让 sidecar 和原生模块直接从文件系统运行。
-- `npmRebuild: false` 基于当前 `node-pty` 的 N-API 预编译产物；升级原生依赖时需重新核实目标平台支持，不能据此承诺所有平台都不需要编译工具。
+- `npmRebuild: false` 基于 `node-pty` 的 N-API 接口（无需按 Electron ABI 重编），但 `node-pty 1.1.0` 仅提供 `darwin-*` 与 `win32-*` 预编译产物，**Linux 下无 prebuild，会在 `npm ci` 时链接宿主 glibc 现编 `pty.node`**。因此发布用 Linux AppImage 必须在 `ubuntu:22.04`（GLIBC 2.35）容器内构建，并通过 `npm run verify:linux-appimage` 校验 ELF `GLIBC`/`GLIBCXX` 符号上限与真包 PTY 冷启动冒烟。
 - 图标来源为 `web/public/icons/icon-1024.png`。Windows 目标为 NSIS + dir，macOS 为 DMG + ZIP，Linux 为 AppImage。macOS ZIP 用于 updater；Windows NSIS 产物名保持无空格，避免 feed 与 Release 资产 URL 不一致。
 
 ## 发布与签名

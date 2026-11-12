@@ -17,6 +17,7 @@ import {
 import { withToken } from "../auth-token";
 import { appUrl } from "../base-url";
 import { isZhLocale, useI18n } from "../i18n";
+import { useCopyFeedback } from "../use-copy-feedback";
 import { Modal } from "./Modal";
 
 export interface MemoryItem {
@@ -416,7 +417,7 @@ export function MemoryModal({
 	const [repoInput, setRepoInput] = useState("pi-memory-sync");
 	const [busy, setBusy] = useState(false);
 	const [errMsg, setErrMsg] = useState<string | null>(null);
-	const [copiedCode, setCopiedCode] = useState(false);
+	const { copied: copiedCode, copy: copyDeviceCode } = useCopyFeedback({ duration: 1800 });
 
 	const view = memory.view;
 	const sync = memory.sync;
@@ -921,9 +922,7 @@ export function MemoryModal({
 												type="button"
 												className="btn secondary"
 												onClick={() => {
-													void navigator.clipboard?.writeText(sync.deviceFlow!.userCode);
-													setCopiedCode(true);
-													setTimeout(() => setCopiedCode(false), 1800);
+													void copyDeviceCode(sync.deviceFlow!.userCode);
 												}}
 											>
 												{copiedCode ? <FiCheck /> : <FiCopy />}{" "}

@@ -48,7 +48,7 @@ npm publish
 #    （都是 npm run build + build:desktop + electron-builder）：
 #      windows-latest  --win            → *.exe (+ .blockmap) + latest.yml
 #      macos-latest    --mac            → *.dmg + *.zip + latest-mac.yml
-#      ubuntu-latest   --linux AppImage → *.AppImage + latest-linux.yml
+#      ubuntu:22.04    --linux AppImage → *.AppImage + latest-linux.yml（容器内锁定 GLIBC<=2.35 并跑 verify-linux-appimage 门禁）
 #    三者都把产物附到该 tag 的 Release（--clobber，重推 tag 即整批重跑+覆盖资产；
 #    workflow_dispatch 只出 workflow artifact、不动 Release 资产）。
 #    注意两点：

@@ -22,7 +22,7 @@ import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:p
 // so their worker/agent handlers tolerate Node `--watch`'s IPC traffic (see the
 // module itself for details).
 import "./patch-node-pty.js";
-import { spawn, type IPty } from "node-pty";
+import type { IPty } from "node-pty";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { CommandDef, ServerMessage, TerminalInfo } from "./protocol.js";
@@ -796,6 +796,26 @@ console.warn = (...args: unknown[]) => {
 
 const require = createRequire(import.meta.url);
 
+type NodePtyModule = typeof import("node-pty");
+let cachedNodePtySpawn: NodePtyModule["spawn"] | null = null;
+
+/**
+ * Lazily load `node-pty` on first local terminal creation rather than at server
+ * module import time. If `pty.node` fails to load (e.g. host GLIBC / ABI
+ * mismatch), the server and Electron desktop shell still start normally so
+ * chat, files, remote SSH terminals, and in-app auto-update remain usable, and
+ * the exact load error is surfaced when opening a local terminal.
+ */
+export function loadNodePtySpawn(loader: (id: string) => Partial<NodePtyModule> = require): NodePtyModule["spawn"] {
+	if (loader === require && cachedNodePtySpawn) return cachedNodePtySpawn;
+	const mod = loader("node-pty");
+	if (typeof mod?.spawn !== "function") {
+		throw new Error("node-pty module did not export spawn()");
+	}
+	if (loader === require) cachedNodePtySpawn = mod.spawn;
+	return mod.spawn;
+}
+
 /** Absolute paths of every node-pty spawn-helper this install can exec. */
 function spawnHelperPaths(): string[] {
 	try {
@@ -1351,7 +1371,8 @@ export class TerminalManager {
 			if (normalizedUri && sshSvc) {
 				pty = sshSvc.createVirtualPty(normalizedUri, cols, rows);
 			} else {
-				pty = spawn(shell, args, {
+				const spawnPty = loadNodePtySpawn();
+				pty = spawnPty(shell, args, {
 					name: "xterm-256color",
 					cols: Math.max(2, Math.floor(cols) || 80),
 					rows: Math.max(2, Math.floor(rows) || 24),

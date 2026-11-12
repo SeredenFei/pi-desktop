@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -177,7 +177,8 @@ describe("runtime-root resolution and version compatibility", () => {
 		it("locates the repository package root", () => {
 			const pkgRoot = findLocalPackageRoot();
 			expect(pkgRoot).toBeTruthy();
-			expect(pkgRoot).toContain("pi-web-ui");
+			const pkgJson = JSON.parse(readFileSync(join(pkgRoot!, "package.json"), "utf8"));
+			expect(pkgJson.name).toBe("pi-web-ui");
 		});
 
 		it("reads expected DSH version from package dependencies or fallback", () => {
