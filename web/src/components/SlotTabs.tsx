@@ -48,6 +48,10 @@ interface SlotTabsProps {
 	/** 顶栏右侧附加内容（可选，比如「全部收起」按钮）。 */
 	extra?: ReactNode;
 	className?: string;
+	/** 宿主程序化切换请求（nonce 递增时强制切到指定 tab id）。 */
+	requestedTab?: { id: string; nonce: number } | null;
+	/** 当前激活 tab 变化回调。 */
+	onTabChange?: (id: string) => void;
 }
 
 /** 持久化 key：与其它前端偏好同前缀（`pi-web-ui:`），便于一次性清理。 */
@@ -98,7 +102,16 @@ function labelOf(tab: SlotTab): string {
 }
 
 // 返回值必须允许 null（空 tabs 什么都不画），所以比 PluginPage 多一个 `| null`。
-export function SlotTabs({ storageKey, tabs, epoch, send, extra, className }: SlotTabsProps): JSX.Element | null {
+export function SlotTabs({
+	storageKey,
+	tabs,
+	epoch,
+	send,
+	extra,
+	className,
+	requestedTab,
+	onTabChange,
+}: SlotTabsProps): JSX.Element | null {
 	// aria 关联用的 DOM id 前缀：useId 保证多实例（右栏 + 设置面板同时开着）不撞车。
 	// 插件 id 可能含怪字符，所以 id 里只放**索引**，不放业务 id。
 	const baseId = useId();
@@ -106,6 +119,17 @@ export function SlotTabs({ storageKey, tabs, epoch, send, extra, className }: Sl
 	const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 	/** 最后一次真正写进 localStorage 的 `<storageKey>:<id>`，避免每帧重复写。 */
 	const savedRef = useRef<string>("");
+	const lastRequestNonceRef = useRef<number>(0);
+
+	useEffect(() => {
+		if (!requestedTab || requestedTab.nonce === lastRequestNonceRef.current) return;
+		lastRequestNonceRef.current = requestedTab.nonce;
+		if (tabs.some((x) => x.id === requestedTab.id)) {
+			setActiveId(requestedTab.id);
+			savedRef.current = `${storageKey}:${requestedTab.id}`;
+			saveActiveId(storageKey, requestedTab.id);
+		}
+	}, [requestedTab, storageKey, tabs]);
 
 	const index = tabs.findIndex((x) => x.id === activeId);
 	// 选中项不存在时**渲染期就**回落第一个（而不是等 effect），避免空内容闪一帧。
@@ -116,12 +140,13 @@ export function SlotTabs({ storageKey, tabs, epoch, send, extra, className }: Sl
 		if (!active) return;
 		// 选中项失效（插件被禁/卸载、调用方重排 tab）→ 同步回落到第一个。
 		if (activeId !== active.id) setActiveId(active.id);
+		onTabChange?.(active.id);
 		const key = `${storageKey}:${active.id}`;
 		if (savedRef.current !== key) {
 			savedRef.current = key;
 			saveActiveId(storageKey, active.id);
 		}
-	}, [active, activeId, storageKey]);
+	}, [active, activeId, onTabChange, storageKey]);
 
 	const selectTab = (tab: SlotTab): void => {
 		setActiveId(tab.id);

@@ -12,7 +12,8 @@ import {
 import { TopBar } from "./components/TopBar";
 import { RemoteDesktopWindow } from "./components/RemoteDesktopWindow";
 import { LeftPanel } from "./components/LeftPanel";
-import { RightPanel } from "./components/RightPanel";
+import { RightPanel, SIDE_CHAT_TAB_ID } from "./components/RightPanel";
+import { registerSideChatUiHost, syncSideChatMainContext } from "./side-chat-store";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
 import { GoalBar } from "./components/GoalBar";
@@ -2330,20 +2331,103 @@ export function App() {
 			return false;
 		}
 	});
+	const [rightActiveTab, setRightActiveTab] = useState<string>("files");
+	const [rightTabRequest, setRightTabRequest] = useState<{ id: string; nonce: number } | null>(null);
+	const requestRightTab = useCallback((id: string) => {
+		setRightActiveTab(id);
+		setRightTabRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
+	}, []);
 	const toggleFiles = useCallback(() => {
 		if (isMobile) {
-			setDrawer((d) => (d === "right" ? null : "right"));
+			if (drawer === "right" && rightActiveTab === "files") {
+				setDrawer(null);
+			} else {
+				setDrawer("right");
+				requestRightTab("files");
+			}
+			return;
+		}
+		if (filesOpen && rightActiveTab !== "files") {
+			requestRightTab("files");
 			return;
 		}
 		setFilesOpen((v) => {
+			const next = !v;
 			try {
-				localStorage.setItem(MINIMAL_FILES_KEY, v ? "0" : "1");
+				localStorage.setItem(MINIMAL_FILES_KEY, next ? "1" : "0");
 			} catch {
 				/* ignore */
 			}
-			return !v;
+			if (next) requestRightTab("files");
+			return next;
 		});
-	}, [isMobile]);
+	}, [drawer, filesOpen, isMobile, requestRightTab, rightActiveTab]);
+	const toggleSideChat = useCallback(() => {
+		if (isMobile) {
+			if (drawer === "right" && rightActiveTab === SIDE_CHAT_TAB_ID) {
+				setDrawer(null);
+			} else {
+				setDrawer("right");
+				requestRightTab(SIDE_CHAT_TAB_ID);
+			}
+			return;
+		}
+		if (filesOpen && rightActiveTab === SIDE_CHAT_TAB_ID) {
+			setFilesOpen(false);
+			try {
+				localStorage.setItem(MINIMAL_FILES_KEY, "0");
+			} catch {
+				/* ignore */
+			}
+			return;
+		}
+		setFilesOpen(true);
+		try {
+			localStorage.setItem(MINIMAL_FILES_KEY, "1");
+		} catch {
+			/* ignore */
+		}
+		requestRightTab(SIDE_CHAT_TAB_ID);
+	}, [drawer, filesOpen, isMobile, requestRightTab, rightActiveTab]);
+
+	const fallbackModelSpec = chat.state?.model ? `${chat.state.model.provider}/${chat.state.model.id}` : "";
+	useEffect(() => {
+		syncSideChatMainContext({
+			mainSessionId: activeSessionKey,
+			cwd: cwd ?? "",
+			fallbackModel: fallbackModelSpec,
+			messages: chat.state?.messages ?? [],
+		});
+	}, [activeSessionKey, cwd, fallbackModelSpec, chat.state?.messages]);
+
+	useEffect(() => {
+		registerSideChatUiHost({
+			openPanelAndFocusTab: () => {
+				setView("chat");
+				if (isMobile) {
+					setDrawer("right");
+				} else if (minimal) {
+					setFilesOpen(true);
+					try {
+						localStorage.setItem(MINIMAL_FILES_KEY, "1");
+					} catch {
+						/* ignore */
+					}
+				} else if (rightCollapsed) {
+					toggleRight();
+				}
+				requestRightTab(SIDE_CHAT_TAB_ID);
+			},
+			jumpToMessage: (messageId: string) => {
+				const sid = chat.state?.sessionId;
+				if (sid && messageId) {
+					setUrlJump({ sessionId: sid, messageId });
+				}
+			},
+			onNotice: (level, text) => pushNotice(level, text),
+		});
+		return () => registerSideChatUiHost(null);
+	}, [chat.state?.sessionId, isMobile, minimal, pushNotice, requestRightTab, rightCollapsed, toggleRight]);
 	// 底部终端面板：打开且没有终端时自动建一个（连接未就绪则等就绪后再建）
 	const [termDockOpen, setTermDockOpenState] = useState(readTermDockOpen);
 	const dockWantsShell = useRef(termDockOpen);
@@ -3053,8 +3137,10 @@ export function App() {
 					isMobile={isMobile}
 					sidebarOpen={isMobile ? drawer === "left" : !leftCollapsed}
 					onToggleSidebar={toggleSidebar}
-					filesOpen={isMobile ? drawer === "right" : filesOpen}
+					filesOpen={(isMobile ? drawer === "right" : filesOpen) && rightActiveTab === "files"}
 					onToggleFiles={toggleFiles}
+					sideChatOpen={(isMobile ? drawer === "right" : filesOpen) && rightActiveTab === SIDE_CHAT_TAB_ID}
+					onToggleSideChat={toggleSideChat}
 					terminalOpen={termDockOpen}
 					onToggleTerminal={toggleTermDock}
 					onOpenPalette={() => setPaletteOpen(true)}
@@ -3827,6 +3913,9 @@ export function App() {
 								plugins={enabledPlugins}
 								pluginsEpoch={chat.pluginsEpoch}
 								send={send}
+								models={chat.models}
+								requestedTab={rightTabRequest}
+								onActiveTabChange={setRightActiveTab}
 							/>
 						</div>
 						{!minimal && !isMobile && rightCollapsed && <PanelRail side="right" onClick={toggleRight} />}

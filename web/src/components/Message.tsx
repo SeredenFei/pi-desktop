@@ -72,6 +72,9 @@ import { useFloatingPanel } from "../use-floating-panel";
 import { BUILTIN_UI_ITEMS, type UiSlotEntry } from "../ui-slots";
 import { appSend, useAppField } from "../app-globals";
 import { isAbortedTurn } from "../aborted-turn";
+import { composeToComposer, focusComposer } from "../composer-bridge";
+import { randomUuid } from "../uuid";
+import { openSideChatForMessage, openSideChatFromSelection, useMessageSideThreadCount } from "../side-chat-store";
 
 // ---------------------------------------------------------------------------
 // Narrowing guards. UiContentBlock is an open union (its last member is
@@ -734,6 +737,7 @@ export const Message = memo(function Message({
 
 	// ---- 整条消息一键复制（issue #228）：纯文本 / Markdown / 长图 ----
 	const cardRef = useRef<HTMLDivElement>(null);
+	const sideThreadCount = useMessageSideThreadCount(message.id);
 	/** 最近一次整条复制的回显（成功 ✓ / 失败 title 报错），1.6s 后自动复位。 */
 	const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null);
 	const exportImage = useExportImage();
@@ -834,14 +838,19 @@ export const Message = memo(function Message({
 
 	/**
 	 * 右键消息 → 宿主的通用右键菜单（ContextMenu 实例由 App 渲染，这里负责准备 entries + onHostAction）。
-	 * 点在链接 / 输入框 或有文本选中时交回系统原生菜单（pre / code 不让路：整条复制与
-	 * 重问对代码块同样有用）；其余弹出消息操作菜单。
+	 * 点在链接 / 输入框 或按住 Shift+右键时交回系统原生菜单；有文本选中时置顶展示选区操作（侧边聊天、
+	 * 快捷解释/翻译/查问题、复制选中文本、引用到主输入框），下方保留当前消息级常用操作。
 	 */
 	const onMsgContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+		if (e.shiftKey) return;
 		const el = e.target;
 		if (el instanceof Element && el.closest("a, input, textarea, [contenteditable='true']")) return;
 		const sel = window.getSelection?.();
-		if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return;
+		const selectedRaw =
+			sel && !sel.isCollapsed && cardRef.current && sel.anchorNode && cardRef.current.contains(sel.anchorNode)
+				? sel.toString()
+				: "";
+		const hasSelection = selectedRaw.trim().length > 0;
 
 		const rawEntries: UiSlotEntry[] =
 			uiContextMessage && uiContextMessage.length > 0 ? uiContextMessage : msgCtxFallback();
@@ -849,6 +858,15 @@ export const Message = memo(function Message({
 		const entries = rawEntries.map((entry) => {
 			if (entry.source !== "host") return readOnly ? { ...entry, hidden: true } : entry;
 			switch (entry.id) {
+				case "host:msg-ctx-side-chat":
+					return hasSelection || (canCopyWhole && !readOnly) ? entry : { ...entry, hidden: true };
+				case "host:msg-ctx-side-explain":
+				case "host:msg-ctx-side-translate":
+				case "host:msg-ctx-side-check":
+				case "host:msg-ctx-copy-selection":
+					return hasSelection ? entry : { ...entry, hidden: true };
+				case "host:msg-ctx-quote-selection":
+					return hasSelection && !readOnly ? entry : { ...entry, hidden: true };
 				case "host:msg-ctx-copy-markdown":
 				case "host:msg-ctx-copy-text":
 					return canCopyWhole ? entry : { ...entry, hidden: true };
@@ -885,7 +903,65 @@ export const Message = memo(function Message({
 			target: { id: message.id, kind: "message", label: ctxLabel },
 			entries,
 			onHostAction: (entry) => {
+				const effectiveSelection = hasSelection ? selectedRaw : wholeMarkdown;
 				switch (entry.id) {
+					case "host:msg-ctx-side-chat":
+						openSideChatFromSelection({
+							selectedText: effectiveSelection,
+							messageId: message.id,
+							role: message.role,
+						});
+						return undefined;
+					case "host:msg-ctx-side-explain":
+						openSideChatFromSelection({
+							selectedText: effectiveSelection,
+							messageId: message.id,
+							role: message.role,
+							autoQuestion: t("sideChatPromptExplain"),
+						});
+						return undefined;
+					case "host:msg-ctx-side-translate":
+						openSideChatFromSelection({
+							selectedText: effectiveSelection,
+							messageId: message.id,
+							role: message.role,
+							autoQuestion: t("sideChatPromptTranslate"),
+						});
+						return undefined;
+					case "host:msg-ctx-side-check":
+						openSideChatFromSelection({
+							selectedText: effectiveSelection,
+							messageId: message.id,
+							role: message.role,
+							autoQuestion: t("sideChatPromptCheck"),
+						});
+						return undefined;
+					case "host:msg-ctx-copy-selection":
+						if (selectedRaw) void copyTextToClipboard(selectedRaw);
+						return undefined;
+					case "host:msg-ctx-quote-selection": {
+						if (selectedRaw.trim()) {
+							const sid = parseSessionHash(window.location.hash)?.sessionId;
+							const accepted = composeToComposer({
+								attachments: [
+									{
+										path: "",
+										name: t("quoteText"),
+										mode: "quote",
+										quote: {
+											text: selectedRaw,
+											messageId: message.id,
+											role: message.role,
+											...(sid ? { sessionId: sid } : {}),
+										},
+										key: randomUuid(),
+									},
+								],
+							});
+							if (accepted) focusComposer();
+						}
+						return undefined;
+					}
 					case "host:msg-ctx-copy-markdown":
 						void doWholeCopy("host:msg-copy-markdown");
 						return undefined;
@@ -1312,6 +1388,18 @@ export const Message = memo(function Message({
 				)}
 				{message.model && <span className="msg-model">{message.model}</span>}
 				{message.timestamp && <span className="msg-time">{formatTime(message.timestamp)}</span>}
+				{sideThreadCount > 0 && (
+					<button
+						type="button"
+						className="msg-side-chat-badge"
+						title={t("sideChatOpenAnchorTip")}
+						aria-label={t("sideChatOpenAnchorTip")}
+						onClick={() => openSideChatForMessage(message.id)}
+					>
+						<span aria-hidden="true">💬</span>
+						<span>{sideThreadCount}</span>
+					</button>
+				)}
 				{qnIndex !== undefined && onJump && (
 					<button
 						type="button"

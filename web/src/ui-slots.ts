@@ -986,7 +986,7 @@ export const BUILTIN_UI_ITEMS: BuiltinUiItem[] = [
 		order: 30,
 	},
 
-	// ---- 右栏 tab（今天只有文件树） ----
+	// ---- 右栏 tab（文件树 + 侧边聊天） ----
 	{
 		id: "host:right-files",
 		slot: "rightpanel.tabs",
@@ -995,6 +995,15 @@ export const BUILTIN_UI_ITEMS: BuiltinUiItem[] = [
 		kind: "view",
 		view: "files",
 		order: 10,
+	},
+	{
+		id: "host:right-sidechat",
+		slot: "rightpanel.tabs",
+		labelKey: "sideChatTab",
+		icon: "chat",
+		kind: "view",
+		view: "side-chat",
+		order: 20,
 	},
 
 	// ---- 左栏会话右键菜单 ----
@@ -1370,6 +1379,66 @@ export const BUILTIN_UI_ITEMS: BuiltinUiItem[] = [
 	},
 
 	// ---- 消息右键菜单（contextmenu.message，渲染与分派见 Message.tsx）----
+	{
+		id: "host:msg-ctx-side-chat",
+		slot: "contextmenu.message",
+		labelKey: "sideChatAsk",
+		icon: "chat",
+		kind: "action",
+		context: "message",
+		order: 1,
+		group: "selection",
+	},
+	{
+		id: "host:msg-ctx-side-explain",
+		slot: "contextmenu.message",
+		labelKey: "sideChatQuickExplain",
+		icon: "zap",
+		kind: "action",
+		context: "message",
+		order: 2,
+		group: "selection",
+	},
+	{
+		id: "host:msg-ctx-side-translate",
+		slot: "contextmenu.message",
+		labelKey: "sideChatQuickTranslate",
+		icon: "globe",
+		kind: "action",
+		context: "message",
+		order: 3,
+		group: "selection",
+	},
+	{
+		id: "host:msg-ctx-side-check",
+		slot: "contextmenu.message",
+		labelKey: "sideChatQuickCheck",
+		icon: "search",
+		kind: "action",
+		context: "message",
+		order: 4,
+		group: "selection",
+	},
+	{
+		id: "host:msg-ctx-copy-selection",
+		slot: "contextmenu.message",
+		labelKey: "copySelectedText",
+		icon: "copy",
+		kind: "action",
+		context: "message",
+		order: 5,
+		group: "selection",
+	},
+	{
+		id: "host:msg-ctx-quote-selection",
+		slot: "contextmenu.message",
+		labelKey: "quoteSelection",
+		icon: "wrap",
+		kind: "action",
+		context: "message",
+		order: 6,
+		group: "selection",
+	},
 	{
 		id: "host:msg-ctx-copy-markdown",
 		slot: "contextmenu.message",

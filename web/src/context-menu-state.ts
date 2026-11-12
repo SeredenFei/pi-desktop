@@ -473,6 +473,9 @@ const GLYPHS: Record<string, string> = {
 	undo: "↺",
 	pin: "📌",
 	volume: "🔊",
+	zap: "⚡",
+	wrap: "↪",
+	check: "✓",
 };
 
 /**

@@ -4,6 +4,7 @@ import type { TextQuote } from "../types";
 import { useT } from "../i18n";
 import { readQuoteSelection } from "../quote-selection";
 import { composeToComposer, focusComposer } from "../composer-bridge";
+import { openSideChatFromSelection } from "../side-chat-store";
 import { randomUuid } from "../uuid";
 
 export function SelectionQuoteButton({
@@ -46,13 +47,13 @@ export function SelectionQuoteButton({
 				onSelect?.();
 				setPending({
 					quote,
-					left: Math.max(8, Math.min(rect.right - 88, window.innerWidth - 96)),
+					left: Math.max(8, Math.min(rect.right - 168, window.innerWidth - 184)),
 					top: Math.max(8, Math.min(rect.top >= 44 ? rect.top - 40 : rect.bottom + 8, window.innerHeight - 42)),
 				});
 			});
 		};
 		const down = (event: MouseEvent) => {
-			if ((event.target as Element)?.closest?.(".quote-selection-button")) return;
+			if ((event.target as Element)?.closest?.(".selection-floating-bar, .quote-selection-button")) return;
 			selecting = event.button === 0 && root.contains(event.target as Node);
 			clear();
 		};
@@ -86,23 +87,41 @@ export function SelectionQuoteButton({
 	}, [rootRef, sessionId, enabled, onSelect]);
 	if (!pending || !enabled || pending.quote.sessionId !== sessionId) return null;
 	return createPortal(
-		<button
-			type="button"
-			className="quote-selection-button"
-			style={{ left: pending.left, top: pending.top }}
-			onMouseDown={(event) => event.preventDefault()}
-			onClick={() => {
-				const accepted = composeToComposer({
-					attachments: [{ path: "", name: t("quoteText"), mode: "quote", quote: pending.quote, key: randomUuid() }],
-				});
-				if (!accepted) return;
-				setPending(null);
-				window.getSelection()?.removeAllRanges();
-				focusComposer();
-			}}
-		>
-			<span aria-hidden="true">↪</span> {t("quoteSelection")}
-		</button>,
+		<div className="selection-floating-bar" style={{ left: pending.left, top: pending.top }}>
+			<button
+				type="button"
+				className="side-chat-selection-button"
+				onMouseDown={(event) => event.preventDefault()}
+				onClick={() => {
+					openSideChatFromSelection({
+						selectedText: pending.quote.text,
+						messageId: pending.quote.messageId,
+						role: pending.quote.role,
+					});
+					setPending(null);
+					window.getSelection()?.removeAllRanges();
+				}}
+			>
+				<span aria-hidden="true">💬</span> {t("sideChatShort")}
+			</button>
+			<span className="selection-floating-sep" aria-hidden="true" />
+			<button
+				type="button"
+				className="quote-selection-button"
+				onMouseDown={(event) => event.preventDefault()}
+				onClick={() => {
+					const accepted = composeToComposer({
+						attachments: [{ path: "", name: t("quoteText"), mode: "quote", quote: pending.quote, key: randomUuid() }],
+					});
+					if (!accepted) return;
+					setPending(null);
+					window.getSelection()?.removeAllRanges();
+					focusComposer();
+				}}
+			>
+				<span aria-hidden="true">↪</span> {t("quoteSelection")}
+			</button>
+		</div>,
 		document.body,
 	);
 }

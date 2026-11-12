@@ -1,5 +1,14 @@
 import { useMemo } from "react";
-import { FiArrowLeft, FiChevronDown, FiCommand, FiFolder, FiMenu, FiSidebar, FiTerminal } from "react-icons/fi";
+import {
+	FiArrowLeft,
+	FiChevronDown,
+	FiCommand,
+	FiFolder,
+	FiMenu,
+	FiMessageSquare,
+	FiSidebar,
+	FiTerminal,
+} from "react-icons/fi";
 import { appSend, useAppField } from "../app-globals";
 import { appUrl } from "../base-url";
 import { formatRemoteProjectName } from "../title-settings";
@@ -18,6 +27,8 @@ export interface MinimalTitleBarProps {
 	onToggleSidebar: () => void;
 	filesOpen: boolean;
 	onToggleFiles: () => void;
+	sideChatOpen?: boolean;
+	onToggleSideChat?: () => void;
 	terminalOpen: boolean;
 	onToggleTerminal: () => void;
 	onOpenPalette: () => void;
@@ -54,6 +65,8 @@ export function MinimalTitleBar({
 	onToggleSidebar,
 	filesOpen,
 	onToggleFiles,
+	sideChatOpen,
+	onToggleSideChat,
 	terminalOpen,
 	onToggleTerminal,
 	onOpenPalette,
@@ -144,6 +157,19 @@ export function MinimalTitleBar({
 
 			<div className="mtb-right">
 				{workingEntry && <BarItem entry={workingEntry} bar="top" chat={chat} view={view} />}
+				{onToggleSideChat && (
+					<button
+						type="button"
+						className={`mtb-btn${sideChatOpen ? " on" : ""}`}
+						onClick={onToggleSideChat}
+						title={t("sideChatTab")}
+						aria-label={t("sideChatTab")}
+						aria-pressed={Boolean(sideChatOpen)}
+						data-testid="mtb-sidechat"
+					>
+						<FiMessageSquare />
+					</button>
+				)}
 				<button
 					type="button"
 					className={`mtb-btn${filesOpen ? " on" : ""}`}

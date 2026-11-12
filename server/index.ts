@@ -127,6 +127,7 @@ import {
 	setGlobalRemoteSshService,
 } from "./remote-ssh-service.js";
 import { handlePluginMessage } from "./dispatch-plugin-handlers.js";
+import { registerSideChatRoutes } from "./side-chat-service.js";
 import { CanvasOrchestrator } from "./canvas/canvas-orchestrator.js";
 import { executeScheduledCanvas, validateScheduledCanvas } from "./canvas/canvas-scheduled-task.js";
 import { setCanvasBroadcaster, setCanvasRuntime } from "./canvas/canvas-agent-tool.js";
@@ -680,6 +681,13 @@ registerFileTransferRoutes(
 	undefined,
 	(clientId) => (sharedStateStore.getSettingsSnapshot(clientId).folderUploadMaxMb ?? 32) * 1024 * 1024,
 );
+
+registerSideChatRoutes(app, {
+	dataDir: DATA_DIR,
+	agentDir: getAgentDir(),
+	defaultCwd: CWD,
+	stateStore: sharedStateStore,
+});
 
 app.get("/api/health", (_req, res) => {
 	// 审查 #352：该端点对未鉴权开放（监控探针需要），故只保留版本/引擎与 SDK

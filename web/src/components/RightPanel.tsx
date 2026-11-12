@@ -16,7 +16,7 @@ import {
 	FiMonitor,
 	FiX,
 } from "react-icons/fi";
-import type { ClientMessage, FileListing, UiPluginInfo } from "../types";
+import type { ClientMessage, FileListing, ModelInfo, UiPluginInfo } from "../types";
 import { useT } from "../i18n";
 import { useAppField } from "../app-globals";
 import { downloadFile, DOWNLOAD_FILE_NOT_FOUND } from "../download";
@@ -29,6 +29,7 @@ import { visibleTreeEntries } from "../file-tree-hidden";
 import type { UiSlotEntry } from "../ui-slots";
 import { contextMenuItems, openContextMenu } from "../context-menu-state";
 import { SlotTabs, type SlotTab } from "./SlotTabs";
+import { SideChatPanel } from "./SideChatPanel";
 import { copyTextToClipboard } from "../use-copy-feedback";
 import { isRemoteWorkspaceUri, parseRemoteWorkspaceUri } from "../remote-ssh-client";
 
@@ -70,6 +71,7 @@ interface FileMenuCtx {
 /** 内置「文件」tab 的 tab id（SlotTabs 拿它做 localStorage 选中态 key）。
  *  刻意不带冒号：插件 tab 的 id 是 `<pluginId>:<itemId>`、一定含冒号，两者永不撞车。 */
 const FILES_TAB_ID = "files";
+export const SIDE_CHAT_TAB_ID = "side-chat";
 
 /** 未接线时的稳定回退（空插件清单 / 空发送器）：避免每次渲染新建引用喂给下游比较。 */
 const EMPTY_PLUGINS: UiPluginInfo[] = [];
@@ -136,6 +138,12 @@ interface RightPanelProps {
 	pluginsEpoch?: number;
 	/** 插件 tab 内插件上行消息（App 注入；与 PluginPage / PluginView 的 send 同形）。 */
 	send?: (msg: { type: "plugin_message"; pluginId: string; payload: unknown }) => void;
+	/** 可用模型列表（供侧边聊天面板钉选专属快模型）。 */
+	models?: ModelInfo[];
+	/** 程序化切换右栏 tab 请求（如右键菜单唤起侧边聊天或顶栏点击文件/侧边聊天按钮）。 */
+	requestedTab?: { id: string; nonce: number } | null;
+	/** 当前右栏激活 tab 回调。 */
+	onActiveTabChange?: (id: string) => void;
 }
 
 export const RightPanel = memo(function RightPanel({
@@ -153,6 +161,9 @@ export const RightPanel = memo(function RightPanel({
 	plugins,
 	pluginsEpoch,
 	send,
+	models,
+	requestedTab,
+	onActiveTabChange,
 }: RightPanelProps) {
 	const t = useT();
 	/** 插件清单回退：未接线时查找只在空数组里跑，不会抛。 */
@@ -985,12 +996,14 @@ export const RightPanel = memo(function RightPanel({
 	 *  「设置里看到的 == 界面上看到的」这条 #146 的核心不变量当场破产。
 	 *  全藏光时右栏就是空的：那是用户/插件的明确意愿，布局页的「恢复」一键可退回。 */
 	const filesTabHidden = (uiRightPanelTabs ?? []).some((e) => e.id === "host:right-files" && e.hidden);
-	/** tab 顺序统一走 slot（含文件 tab 的位置，不再固定第一；未接线时保持旧顺序）。 */
+	const sideChatTabHidden = (uiRightPanelTabs ?? []).some((e) => e.id === "host:right-sidechat" && e.hidden);
+	/** tab 顺序统一走 slot（含文件与侧边聊天 tab 的位置；未接线时保持声明顺序）。 */
 	const orderTabs = (tabs: SlotTab[]): SlotTab[] => {
 		const visible = (uiRightPanelTabs ?? []).filter((e) => !e.hidden);
 		if (visible.length === 0) return tabs;
 		const rank = new Map(visible.map((e, i) => [e.id, i] as const));
-		const key = (id: string) => rank.get(id === FILES_TAB_ID ? "host:right-files" : id) ?? 1e9;
+		const key = (id: string) =>
+			rank.get(id === FILES_TAB_ID ? "host:right-files" : id === SIDE_CHAT_TAB_ID ? "host:right-sidechat" : id) ?? 1e9;
 		return [...tabs].sort((a, b) => key(a.id) - key(b.id));
 	};
 
@@ -1019,6 +1032,8 @@ export const RightPanel = memo(function RightPanel({
 					storageKey="rightpanel"
 					epoch={pluginsEpoch ?? 0}
 					send={send ?? NOOP_SEND}
+					requestedTab={requestedTab}
+					onTabChange={onActiveTabChange}
 					tabs={orderTabs([
 						...(filesTabHidden
 							? []
@@ -1474,6 +1489,16 @@ export const RightPanel = memo(function RightPanel({
 												</div>
 											</>
 										),
+									},
+								]),
+						...(sideChatTabHidden
+							? []
+							: [
+									{
+										id: SIDE_CHAT_TAB_ID,
+										label: t("sideChatTab"),
+										icon: "💬",
+										element: <SideChatPanel models={models} />,
 									},
 								]),
 						...pluginTabs,

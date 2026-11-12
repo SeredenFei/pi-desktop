@@ -310,7 +310,10 @@ describe("buildUiSlots / 第 1 层：宿主默认", () => {
 	it("kind=view 的条目带 view 目标（宿主据此切视图）", () => {
 		const slots = build([]);
 		expect(slots["topbar.primary"].find((e) => e.id === "host:git")?.view).toBe("git");
-		expect(slots["rightpanel.tabs"].map((e) => [e.id, e.view])).toEqual([["host:right-files", "files"]]);
+		expect(slots["rightpanel.tabs"].map((e) => [e.id, e.view])).toEqual([
+			["host:right-files", "files"],
+			["host:right-sidechat", "side-chat"],
+		]);
 	});
 
 	it("同 order 时保持声明顺序（稳定排序）", () => {
