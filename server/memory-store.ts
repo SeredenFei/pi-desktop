@@ -3,8 +3,8 @@
  *
  * 职责：
  * 1. 管理两层记忆库：
- *    - 全局记忆（global）：所有会话共享（个人偏好、长期背景、通用约定），上限 100 条；
- *    - 项目记忆（project）：按项目隔离（每个话题项目或本地代码仓库各自一套，上限 100 条）+ 项目自定义指令；
+ *    - 全局记忆（global）：所有会话共享（个人偏好、长期背景、通用约定），上限 300 条；
+ *    - 项目记忆（project）：按项目隔离（每个话题项目或本地代码仓库各自一套，上限 300 条）+ 项目自定义指令；
  * 2. 维护「💬 独立对话空间」（<dataDir>/chat-space）与「📁 话题项目」（<dataDir>/chat-projects/<slug>）；
  * 3. 提供按条目 ID + updatedAt 时间戳（含 deletedAt 墓碑）的确定性无损合并 mergeMemoryDocuments()，
  *    供 GitHub 跨端同步在多设备并发修改时安全合流；
@@ -17,14 +17,14 @@ import { basename, join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { normalizePathKey } from "./client-state.js";
 
-export const MAX_MEMORY_ITEM_CHARS = 300;
-export const MAX_MEMORIES_PER_SCOPE = 100;
-export const MAX_PROJECT_INSTRUCTIONS_CHARS = 4000;
-export const MAX_SYNCED_CHAT_TRANSCRIPTS = 60;
-/** 瘦身后的单会话同步上限（512KB 纯对话文本 ≈ 100~150 轮完整问答）。 */
-export const MAX_TRANSCRIPT_BYTES = 512 * 1024;
-/** 磁盘原始会话文件读取上限（10MB，读取后经 compactJsonlForSync 剥离工具 Schema 与签名后通常缩小 85%~92%）。 */
-export const MAX_RAW_SESSION_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_MEMORY_ITEM_CHARS = 1000;
+export const MAX_MEMORIES_PER_SCOPE = 300;
+export const MAX_PROJECT_INSTRUCTIONS_CHARS = 8000;
+export const MAX_SYNCED_CHAT_TRANSCRIPTS = 200;
+/** 瘦身后的单会话同步上限（8MB 纯对话文本，配合 GitHub Git Blob API 支持长程深度对话完整同步）。 */
+export const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+/** 磁盘原始会话文件读取上限（50MB，读取后经 compactJsonlForSync 剥离工具 Schema 与签名后通常缩小 85%~92%）。 */
+export const MAX_RAW_SESSION_FILE_BYTES = 50 * 1024 * 1024;
 
 export type MemoryScope = "global" | "project";
 
@@ -531,7 +531,7 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 			if (projects[chosen.scopeKey]?.deletedAt) continue;
 			const compacted = compactJsonlForSync(chosen.jsonl);
 			const cleanJsonl = compacted ? compacted.jsonl : chosen.jsonl;
-			if (cleanJsonl.length <= MAX_TRANSCRIPT_BYTES) {
+			if (Buffer.byteLength(cleanJsonl, "utf8") <= MAX_TRANSCRIPT_BYTES) {
 				transcriptList.push({
 					...chosen,
 					jsonl: cleanJsonl,
@@ -807,7 +807,7 @@ export class MemoryStore {
 					const rawText = readFileSync(fp, "utf8");
 					const compacted = compactJsonlForSync(rawText, t.placeholder);
 					if (!compacted || this.isSessionIsolated(compacted.sessionId)) continue;
-					if (compacted.jsonl.length > MAX_TRANSCRIPT_BYTES) continue;
+					if (Buffer.byteLength(compacted.jsonl, "utf8") > MAX_TRANSCRIPT_BYTES) continue;
 					const sid = compacted.sessionId;
 					const prev = nextMap[sid];
 					const mtime = Math.max(Math.round(st.mtimeMs), compacted.lastTimestamp);

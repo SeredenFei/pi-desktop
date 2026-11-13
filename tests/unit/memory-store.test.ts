@@ -2,8 +2,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
-import { MemoryStore, mergeMemoryDocuments, type MemoryDocument } from "../../server/memory-store.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	MAX_MEMORY_ITEM_CHARS,
+	MAX_TRANSCRIPT_BYTES,
+	MemoryStore,
+	mergeMemoryDocuments,
+	type MemoryDocument,
+} from "../../server/memory-store.js";
+import { MemorySyncService } from "../../server/memory-sync.js";
 import { parseMarkers } from "../../server/markers/marker.js";
 import { memoryMarker } from "../../server/markers/builtins/memory.js";
 
@@ -16,6 +23,7 @@ describe("MemoryStore & cross-device merge", () => {
 	};
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		for (const d of tempDirs.splice(0)) {
 			try {
 				rmSync(d, { recursive: true, force: true });
@@ -184,5 +192,145 @@ describe("MemoryStore & cross-device merge", () => {
 			.join(" | ");
 		expect(allTexts).toContain("3080");
 		expect(allTexts).toContain("找工作找实习");
+	});
+
+	it("preserves long memory items up to 1000 chars and syncs >512KB transcripts", () => {
+		expect(MAX_MEMORY_ITEM_CHARS).toBe(1000);
+		expect(MAX_TRANSCRIPT_BYTES).toBe(8 * 1024 * 1024);
+
+		const dir = makeTempDir();
+		const store = new MemoryStore(dir);
+		const longFact = `Rule: ${"a".repeat(850)}`;
+		const item = store.addItem("global", longFact);
+		expect(item.content.length).toBe(longFact.length);
+
+		const chatProj = store.createChatProject("Large Sim2Sim");
+		const sessionDir = SessionManager.create(chatProj.path).getSessionDir();
+		const bigBody = "x".repeat(700 * 1024);
+		const lines = [
+			JSON.stringify({
+				type: "session",
+				id: "sid-large-700k",
+				cwd: chatProj.path,
+				timestamp: new Date().toISOString(),
+			}),
+			JSON.stringify({
+				type: "message",
+				message: { role: "user", content: bigBody, timestamp: Date.now() },
+			}),
+		];
+		writeFileSync(join(sessionDir, "large-session.jsonl"), `${lines.join("\n")}\n`, "utf8");
+
+		expect(store.captureChatTranscriptsFromDisk(false)).toBe(true);
+		const doc = store.getDocument();
+		expect(doc.chatTranscripts?.["sid-large-700k"]).toBeDefined();
+		expect(Buffer.byteLength(doc.chatTranscripts?.["sid-large-700k"]?.jsonl ?? "", "utf8")).toBeGreaterThan(512 * 1024);
+	});
+
+	it("pulls >1MB transcripts via Git Blobs fallback and queues concurrent syncs", async () => {
+		const dir = makeTempDir();
+		const store = new MemoryStore(dir);
+		const sync = new MemorySyncService(dir, store);
+		writeFileSync(
+			join(dir, "memory-sync.json"),
+			JSON.stringify({
+				account: { token: "gho_test_token", username: "tester", repo: "pi-memory-sync" },
+			}),
+			"utf8",
+		);
+
+		const remoteJsonl = [
+			JSON.stringify({
+				type: "session",
+				id: "sid-blob-1",
+				cwd: "__PI_CHAT_SPACE__",
+				timestamp: "2026-11-13T00:00:00.000Z",
+			}),
+			JSON.stringify({
+				type: "message",
+				message: { role: "user", content: "Pulled via Git Blob API", timestamp: 1794500000000 },
+			}),
+		].join("\n");
+		const remoteIndexDoc: MemoryDocument = {
+			version: 1,
+			updatedAt: 1794500000000,
+			global: [],
+			projects: {},
+			transcriptIndex: {
+				"sid-blob-1": {
+					sessionId: "sid-blob-1",
+					fileName: "sid-blob-1.jsonl",
+					title: "Blob Session",
+					scopeKey: "chat-space",
+					lineCount: 2,
+					messageCount: 1,
+					updatedAt: 1794500000000,
+				},
+			},
+		};
+
+		let indexPutCount = 0;
+		let unblockFirstBlob!: () => void;
+		const firstBlobGate = new Promise<void>((resolve) => {
+			unblockFirstBlob = resolve;
+		});
+
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+			const url = String(input);
+			const method = (init?.method ?? "GET").toUpperCase();
+			if (url.endsWith("/repos/tester/pi-memory-sync") && method === "GET") {
+				return new Response("{}", { status: 200 });
+			}
+			if (url.endsWith("/contents/memory-store.json") && method === "GET") {
+				return new Response(
+					JSON.stringify({
+						sha: "sha-index-1",
+						content: Buffer.from(JSON.stringify(remoteIndexDoc), "utf8").toString("base64"),
+					}),
+					{ status: 200 },
+				);
+			}
+			if (url.endsWith("/contents/transcripts/sid-blob-1.jsonl") && method === "GET") {
+				// Simulate GitHub Contents API >1MB 403 too_large response
+				return new Response(JSON.stringify({ errors: [{ code: "too_large" }] }), { status: 403 });
+			}
+			if (url.endsWith("/contents/transcripts") && method === "GET") {
+				return new Response(
+					JSON.stringify([{ name: "sid-blob-1.jsonl", path: "transcripts/sid-blob-1.jsonl", sha: "blob-sha-large" }]),
+					{ status: 200 },
+				);
+			}
+			if (url.endsWith("/git/blobs/blob-sha-large") && method === "GET") {
+				await firstBlobGate;
+				return new Response(
+					JSON.stringify({
+						sha: "blob-sha-large",
+						content: Buffer.from(`${remoteJsonl}\n`, "utf8").toString("base64"),
+					}),
+					{ status: 200 },
+				);
+			}
+			if (method === "PUT" && url.endsWith("/contents/memory-store.json")) {
+				indexPutCount++;
+				return new Response(JSON.stringify({ content: { sha: `sha-index-${indexPutCount + 1}` } }), { status: 200 });
+			}
+			if (method === "PUT") {
+				return new Response(JSON.stringify({ content: { sha: "sha-put-ok" } }), { status: 200 });
+			}
+			return new Response("Not Found", { status: 404 });
+		});
+
+		const firstSync = sync.syncNow();
+		// Trigger a new memory mutation + second syncNow while the first sync is mid-flight
+		await Promise.resolve();
+		store.addItem("global", "Added during in-flight sync");
+		const queuedSync = sync.syncNow();
+		unblockFirstBlob();
+
+		const [res1, res2] = await Promise.all([firstSync, queuedSync]);
+		expect(res1.lastError).toBeNull();
+		expect(res2.lastError).toBeNull();
+		expect(indexPutCount).toBe(2);
+		expect(store.getDocument().chatTranscripts?.["sid-blob-1"]?.jsonl).toContain("Pulled via Git Blob API");
 	});
 });
