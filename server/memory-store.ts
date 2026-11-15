@@ -21,10 +21,43 @@ export const MAX_MEMORY_ITEM_CHARS = 1000;
 export const MAX_MEMORIES_PER_SCOPE = 300;
 export const MAX_PROJECT_INSTRUCTIONS_CHARS = 8000;
 export const MAX_SYNCED_CHAT_TRANSCRIPTS = 200;
-/** 瘦身后的单会话同步上限（8MB 纯对话文本，配合 GitHub Git Blob API 支持长程深度对话完整同步）。 */
-export const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
-/** 磁盘原始会话文件读取上限（50MB，读取后经 compactJsonlForSync 剥离工具 Schema 与签名后通常缩小 85%~92%）。 */
-export const MAX_RAW_SESSION_FILE_BYTES = 50 * 1024 * 1024;
+/** 瘦身后的单会话同步上限（16MB 纯对话文本 ≈ 3000~5000 轮完整问答，配合 GitHub Git Blob API）。 */
+export const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+/** 磁盘原始会话文件读取上限（64MB，读取后经 compactJsonlForSync 剥离工具 Schema、签名与长工具输出后大幅缩小）。 */
+export const MAX_RAW_SESSION_FILE_BYTES = 64 * 1024 * 1024;
+/**
+ * 全部已同步对话在**内存里**的总预算（超出时按 updatedAt 从旧到新丢弃）：
+ * 单会话上限与条数上调后，满额会话最坏会翻到 GB 级 —— 用总量闸门兜住 RSS，
+ * 丢掉的是「最旧且从未再改动」的会话（磁盘 transcripts/<sid>.jsonl 仍在，可再次捕获）。
+ */
+export const MAX_TRANSCRIPTS_TOTAL_BYTES = 192 * 1024 * 1024;
+/** 工具输出/参数单字段瘦身阈值（保留首尾关键内容，确保长会话也能稳定控制在 512KB 以内兼容旧端）。 */
+const MAX_SYNC_TOOL_TEXT_CHARS = 1200;
+const TIGHT_SYNC_TOOL_TEXT_CHARS = 600;
+const LEGACY_TRANSCRIPT_TARGET_CHARS = 480 * 1024;
+
+/**
+ * 按「新→旧」保留会话，直到累计字节超过 `MAX_TRANSCRIPTS_TOTAL_BYTES` 或条数达到
+ * `MAX_SYNCED_CHAT_TRANSCRIPTS`。纯函数，便于单测。
+ */
+export function trimTranscriptsToBudget(
+	transcripts: Array<{ sessionId: string; jsonl?: string; updatedAt?: number }>,
+	options?: { maxCount?: number; maxTotalBytes?: number },
+): Array<{ sessionId: string; jsonl?: string; updatedAt?: number }> {
+	const maxCount = options?.maxCount ?? MAX_SYNCED_CHAT_TRANSCRIPTS;
+	const maxTotalBytes = options?.maxTotalBytes ?? MAX_TRANSCRIPTS_TOTAL_BYTES;
+	const sorted = [...transcripts].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+	const kept: Array<{ sessionId: string; jsonl?: string; updatedAt?: number }> = [];
+	let total = 0;
+	for (const item of sorted) {
+		if (kept.length >= maxCount) break;
+		const size = item.jsonl?.length ?? 0;
+		if (kept.length > 0 && total + size > maxTotalBytes) break;
+		kept.push(item);
+		total += size;
+	}
+	return kept;
+}
 
 export type MemoryScope = "global" | "project";
 
@@ -135,19 +168,32 @@ function emptyDocument(): MemoryDocument {
 	};
 }
 
-/**
- * 对会话 JSONL 进行无损瘦身与跨平台路径脱敏：
- * 1. 首行 session 的 cwd 替换为占位符（或还原为本机实际路径），消除 Windows/Mac/Linux 路径差异；
- * 2. 剥离 role="system" 记录中庞大的 sections（含本机绝对路径的系统提示词快照）与 toolsAdded（35KB+ 工具 JSON Schema），
- *    仅保留 id / parentId / timestamp 空壳，确保 SessionManager 的 parentId 消息链表 100% 不断裂；
- * 3. 剥离 assistant 消息中无展示价值的加密签名串 thinkingSignature（单轮 10KB+ base64），完整保留 thinking 思考正文与回答正文；
- * 4. 统计有效消息行数与最新一条记录的真实时间戳，避免跨机下载时文件 mtime 覆盖真实对话时间。
- */
-export function compactJsonlForSync(
-	rawText: string,
-	targetCwd?: string,
+function slimSyncText(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const headLen = Math.floor(maxChars * 0.65);
+	const tailLen = Math.max(0, maxChars - headLen);
+	const omitted = text.length - headLen - tailLen;
+	return `${text.slice(0, headLen)}\n...[同步瘦身已省略 ${omitted} 字符]...\n${text.slice(text.length - tailLen)}`;
+}
+
+function slimSyncValue(val: unknown, maxChars: number): unknown {
+	if (typeof val === "string") return slimSyncText(val, maxChars);
+	if (Array.isArray(val)) return val.map((item) => slimSyncValue(item, maxChars));
+	if (val && typeof val === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+			out[k] = slimSyncValue(v, maxChars);
+		}
+		return out;
+	}
+	return val;
+}
+
+function compactJsonlPass(
+	rawLines: string[],
+	targetCwd: string | undefined,
+	toolTextLimit: number,
 ): { jsonl: string; sessionId: string; lineCount: number; lastTimestamp: number } | null {
-	const rawLines = rawText.split("\n");
 	const outLines: string[] = [];
 	let sessionId = "";
 	let lastTimestamp = 0;
@@ -195,6 +241,10 @@ export function compactJsonlForSync(
 				);
 				continue;
 			}
+			delete msg.usage;
+			delete msg.details;
+			delete msg.responseId;
+			delete msg.rawStopReason;
 			if (Array.isArray(msg.content)) {
 				msg.content = msg.content.map((part) => {
 					if (!part || typeof part !== "object") return part;
@@ -202,6 +252,12 @@ export function compactJsonlForSync(
 					delete p.thinkingSignature;
 					if (p.type === "image" && typeof p.data === "string" && p.data.length > 32768) {
 						delete p.data;
+					}
+					if (msg.role === "toolResult" && p.type === "text" && typeof p.text === "string") {
+						p.text = slimSyncText(p.text, toolTextLimit);
+					}
+					if (msg.role === "assistant" && p.type === "toolCall" && p.arguments && typeof p.arguments === "object") {
+						p.arguments = slimSyncValue(p.arguments, toolTextLimit);
 					}
 					return p;
 				});
@@ -225,6 +281,28 @@ export function compactJsonlForSync(
 		lineCount: outLines.length,
 		lastTimestamp,
 	};
+}
+
+/**
+ * 对会话 JSONL 进行无损瘦身与跨平台路径脱敏：
+ * 1. 首行 session 的 cwd 替换为占位符（或还原为本机实际路径），消除 Windows/Mac/Linux 路径差异；
+ * 2. 剥离 role="system" 记录中庞大的 sections（含本机绝对路径的系统提示词快照）与 toolsAdded（35KB+ 工具 JSON Schema），
+ *    仅保留 id / parentId / timestamp 空壳，确保 SessionManager 的 parentId 消息链表 100% 不断裂；
+ * 3. 剥离 assistant 消息中无展示价值的加密签名串 thinkingSignature（单轮 10KB+ base64），完整保留 thinking 思考正文与回答正文；
+ * 4. 对超长 toolResult / toolCall 参数做首尾截断瘦身，确保几百轮的长对话也能顺利跨端同步；
+ * 5. 统计有效消息行数与最新一条记录的真实时间戳，避免跨机下载时文件 mtime 覆盖真实对话时间。
+ */
+export function compactJsonlForSync(
+	rawText: string,
+	targetCwd?: string,
+): { jsonl: string; sessionId: string; lineCount: number; lastTimestamp: number } | null {
+	const rawLines = rawText.split("\n");
+	const firstPass = compactJsonlPass(rawLines, targetCwd, MAX_SYNC_TOOL_TEXT_CHARS);
+	if (!firstPass) return null;
+	if (firstPass.jsonl.length > LEGACY_TRANSCRIPT_TARGET_CHARS) {
+		return compactJsonlPass(rawLines, targetCwd, TIGHT_SYNC_TOOL_TEXT_CHARS) ?? firstPass;
+	}
+	return firstPass;
 }
 
 function clampText(raw: string, maxChars: number): string {
@@ -540,9 +618,9 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 			}
 		}
 	}
-	transcriptList.sort((a, b) => b.updatedAt - a.updatedAt);
-	for (const t of transcriptList.slice(0, MAX_SYNCED_CHAT_TRANSCRIPTS)) {
-		mergedTranscripts[t.sessionId] = t;
+	const keptTranscripts = trimTranscriptsToBudget(transcriptList);
+	for (const t of keptTranscripts) {
+		mergedTranscripts[t.sessionId] = t as SyncedChatTranscript;
 	}
 	const mergedIndex: Record<string, TranscriptIndexEntry> = {};
 	for (const [sid, t] of Object.entries(mergedTranscripts)) {
@@ -833,6 +911,11 @@ export class MemoryStore {
 		}
 
 		if (changed) {
+			const kept = trimTranscriptsToBudget(Object.values(nextMap));
+			const keptIds = new Set(kept.map((t) => t.sessionId));
+			for (const sid of Object.keys(nextMap)) {
+				if (!keptIds.has(sid)) delete nextMap[sid];
+			}
 			this.doc.chatTranscripts = mergeMemoryDocuments(this.doc, {
 				...this.doc,
 				chatTranscripts: nextMap,

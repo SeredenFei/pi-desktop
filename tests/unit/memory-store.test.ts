@@ -8,6 +8,7 @@ import {
 	MAX_TRANSCRIPT_BYTES,
 	MemoryStore,
 	mergeMemoryDocuments,
+	trimTranscriptsToBudget,
 	type MemoryDocument,
 } from "../../server/memory-store.js";
 import { MemorySyncService } from "../../server/memory-sync.js";
@@ -178,6 +179,25 @@ describe("MemoryStore & cross-device merge", () => {
 		expect(storeB.listChatProjects()).toHaveLength(0);
 	});
 
+	it("按总量预算裁剪已同步对话：新→旧保留，超出预算即止（防 RSS 失控）", () => {
+		const mk = (sessionId: string, kb: number, updatedAt: number) => ({
+			sessionId,
+			jsonl: "x".repeat(kb * 1024),
+			updatedAt,
+		});
+		const kept = trimTranscriptsToBudget([mk("old", 100, 1), mk("new", 100, 3), mk("mid", 100, 2)], {
+			maxCount: 10,
+			maxTotalBytes: 250 * 1024,
+		});
+		expect(kept.map((t) => t.sessionId)).toEqual(["new", "mid"]);
+		// 至少保留最新的一个（哪怕单个就超预算，也不能把内存清空）
+		expect(trimTranscriptsToBudget([mk("huge", 400, 9)], { maxTotalBytes: 100 * 1024 })).toHaveLength(1);
+		// 条数上限
+		expect(
+			trimTranscriptsToBudget([mk("a", 1, 3), mk("b", 1, 2), mk("c", 1, 1)], { maxCount: 2, maxTotalBytes: 10 ** 9 }),
+		).toHaveLength(2);
+	});
+
 	it("auto-extracts user hardware, background, and goals from chat messages", () => {
 		const dir = makeTempDir();
 		const store = new MemoryStore(dir);
@@ -196,7 +216,7 @@ describe("MemoryStore & cross-device merge", () => {
 
 	it("preserves long memory items up to 1000 chars and syncs >512KB transcripts", () => {
 		expect(MAX_MEMORY_ITEM_CHARS).toBe(1000);
-		expect(MAX_TRANSCRIPT_BYTES).toBe(8 * 1024 * 1024);
+		expect(MAX_TRANSCRIPT_BYTES).toBe(16 * 1024 * 1024);
 
 		const dir = makeTempDir();
 		const store = new MemoryStore(dir);
