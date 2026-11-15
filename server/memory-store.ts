@@ -37,6 +37,18 @@ const TIGHT_SYNC_TOOL_TEXT_CHARS = 600;
 const LEGACY_TRANSCRIPT_TARGET_CHARS = 480 * 1024;
 
 /**
+ * 自动压缩的**检测水位**：瘦身后的单会话仍超过它就再压一轮（`TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES`）。
+ * 只有极长的会话会命中（4MB 纯对话文本 ≈ 800~1200 轮），命中时依次收紧工具输出 → 折叠最旧消息正文。
+ */
+export const TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES = 4 * 1024 * 1024;
+/** 自动压缩的**目标体积**：压到它以下就停手（硬上限仍是 MAX_TRANSCRIPT_BYTES，超了会跳过同步）。 */
+export const TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES = 2 * 1024 * 1024;
+/** 工具输出收紧阶梯（命中检测水位后逐级尝试，先收紧截断长度再折叠消息）。 */
+const AUTO_COMPACT_TOOL_TEXT_LADDER = [MAX_SYNC_TOOL_TEXT_CHARS, 600, 300, 120] as const;
+/** 被折叠消息的正文占位符（保留 role / id / parentId，parentId 链不断裂）。 */
+export const ELIDED_CONTENT_MARKER = "[更早内容已折叠：跨设备同步按体积上限压缩]";
+
+/**
  * 按「新→旧」保留会话，直到累计字节超过 `MAX_TRANSCRIPTS_TOTAL_BYTES` 或条数达到
  * `MAX_SYNCED_CHAT_TRANSCRIPTS`。纯函数，便于单测。
  */
@@ -291,6 +303,9 @@ function compactJsonlPass(
  * 3. 剥离 assistant 消息中无展示价值的加密签名串 thinkingSignature（单轮 10KB+ base64），完整保留 thinking 思考正文与回答正文；
  * 4. 对超长 toolResult / toolCall 参数做首尾截断瘦身，确保几百轮的长对话也能顺利跨端同步；
  * 5. 统计有效消息行数与最新一条记录的真实时间戳，避免跨机下载时文件 mtime 覆盖真实对话时间。
+ *
+ * 体积检测另有一层：瘦身后仍 > `TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES` 时，同步前会调用
+ * `compactJsonlToTarget()` 继续压缩（收紧工具输出阶梯 → 折叠最旧消息正文，parentId 链保持完整）。
  */
 export function compactJsonlForSync(
 	rawText: string,
@@ -303,6 +318,66 @@ export function compactJsonlForSync(
 		return compactJsonlPass(rawLines, targetCwd, TIGHT_SYNC_TOOL_TEXT_CHARS) ?? firstPass;
 	}
 	return firstPass;
+}
+
+/**
+ * 把已瘦身的 JSONL 再压到 `targetBytes` 以内：**按时间从旧到新**折叠消息正文，
+ * 只替换 `message.content`，保留 `id / parentId / timestamp / role` ——
+ * SessionManager 的 parentId 链表因此保持完整，跨设备下载后仍能正常打开。
+ *
+ * 纯函数（输入输出都是字符串），便于单测。
+ */
+export function elideOldestMessageContents(jsonl: string, targetBytes: number): { jsonl: string; elidedLines: number } {
+	const lines = jsonl.replace(/\n+$/, "").split("\n");
+	let total = lines.reduce((sum, line) => sum + line.length + 1, 0);
+	if (total <= targetBytes) return { jsonl, elidedLines: 0 };
+	let elided = 0;
+	for (let i = 0; i < lines.length && total > targetBytes; i++) {
+		let obj: Record<string, unknown>;
+		try {
+			obj = JSON.parse(lines[i]!) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		if (obj.type !== "message" || !obj.message || typeof obj.message !== "object") continue;
+		const msg = obj.message as Record<string, unknown>;
+		if (msg.role === "system") continue; // 已是最小空壳
+		const current = JSON.stringify(msg.content ?? "");
+		if (current === JSON.stringify([{ type: "text", text: ELIDED_CONTENT_MARKER }])) continue;
+		const nextMsg: Record<string, unknown> = { ...msg, content: [{ type: "text", text: ELIDED_CONTENT_MARKER }] };
+		// 思考正文也一并去掉（content 之外的 old 字段残留会白占体积）
+		delete nextMsg.thinking;
+		delete nextMsg.thinkingText;
+		const nextLine = JSON.stringify({ ...obj, message: nextMsg });
+		if (nextLine.length >= lines[i]!.length) continue;
+		total -= lines[i]!.length + 1;
+		lines[i] = nextLine;
+		total += nextLine.length + 1;
+		elided++;
+	}
+	return { jsonl: `${lines.join("\n")}\n`, elidedLines: elided };
+}
+
+/**
+ * 带**体积检测**的自动压缩：先用瘦身阶梯（工具输出 1200 → 600 → 300 → 120 字符）逐级尝试，
+ * 仍超过 `targetBytes` 才折叠最旧消息正文。返回是否发生了额外压缩，便于日志/测试断言。
+ */
+export function compactJsonlToTarget(
+	rawText: string,
+	targetCwd: string | undefined,
+	targetBytes: number = TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES,
+): { jsonl: string; sessionId: string; lineCount: number; lastTimestamp: number; elidedLines: number } | null {
+	const rawLines = rawText.split("\n");
+	let last: ReturnType<typeof compactJsonlPass> = null;
+	for (const limit of AUTO_COMPACT_TOOL_TEXT_LADDER) {
+		const pass = compactJsonlPass(rawLines, targetCwd, limit);
+		if (!pass) return null;
+		last = pass;
+		if (pass.jsonl.length <= targetBytes) return { ...pass, elidedLines: 0 };
+	}
+	if (!last) return null;
+	const elided = elideOldestMessageContents(last.jsonl, targetBytes);
+	return { ...last, jsonl: elided.jsonl, elidedLines: elided.elidedLines };
 }
 
 function clampText(raw: string, maxChars: number): string {
@@ -607,7 +682,11 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 		}
 		if (chosen && chosen.sessionId && chosen.jsonl) {
 			if (projects[chosen.scopeKey]?.deletedAt) continue;
-			const compacted = compactJsonlForSync(chosen.jsonl);
+			let compacted = compactJsonlForSync(chosen.jsonl);
+			// 体积检测：瘦身后仍超水位 → 再压到目标体积（折叠最旧消息正文，parentId 链保持完整）
+			if (compacted && compacted.jsonl.length > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
+				compacted = compactJsonlToTarget(chosen.jsonl, undefined, TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES) ?? compacted;
+			}
 			const cleanJsonl = compacted ? compacted.jsonl : chosen.jsonl;
 			if (Buffer.byteLength(cleanJsonl, "utf8") <= MAX_TRANSCRIPT_BYTES) {
 				transcriptList.push({
@@ -883,7 +962,20 @@ export class MemoryStore {
 					}
 					if (st.size === 0 || st.size > MAX_RAW_SESSION_FILE_BYTES) continue;
 					const rawText = readFileSync(fp, "utf8");
-					const compacted = compactJsonlForSync(rawText, t.placeholder);
+					let compacted = compactJsonlForSync(rawText, t.placeholder);
+					// 体积检测：超过水位就先自动压缩（先收紧工具输出，再折叠最旧消息正文）
+					if (compacted && compacted.jsonl.length > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
+						const before = compacted.jsonl.length;
+						const shrunk = compactJsonlToTarget(rawText, t.placeholder, TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES);
+						if (shrunk) {
+							compacted = shrunk;
+							console.warn(
+								`[memory] 会话 ${shrunk.sessionId} 瘦身后 ${(before / 1024 / 1024).toFixed(1)}MB，` +
+									`已自动压缩到 ${(shrunk.jsonl.length / 1024 / 1024).toFixed(1)}MB` +
+									`（折叠 ${shrunk.elidedLines} 条最旧消息正文）`,
+							);
+						}
+					}
 					if (!compacted || this.isSessionIsolated(compacted.sessionId)) continue;
 					if (Buffer.byteLength(compacted.jsonl, "utf8") > MAX_TRANSCRIPT_BYTES) continue;
 					const sid = compacted.sessionId;

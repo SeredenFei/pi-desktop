@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	ELIDED_CONTENT_MARKER,
 	MAX_MEMORY_ITEM_CHARS,
 	MAX_TRANSCRIPT_BYTES,
 	MemoryStore,
+	compactJsonlToTarget,
+	elideOldestMessageContents,
 	mergeMemoryDocuments,
 	trimTranscriptsToBudget,
 	type MemoryDocument,
@@ -196,6 +199,77 @@ describe("MemoryStore & cross-device merge", () => {
 		expect(
 			trimTranscriptsToBudget([mk("a", 1, 3), mk("b", 1, 2), mk("c", 1, 1)], { maxCount: 2, maxTotalBytes: 10 ** 9 }),
 		).toHaveLength(2);
+	});
+
+	it("体积检测：超过目标就自动压缩，先收紧工具输出、再折叠最旧消息正文", () => {
+		// 构造：1 行 session 头 + 90 条消息（45 条各带 100KB 工具输出 + 45 条各带 20KB 用户正文，约 5.4MB）
+		const big = "x".repeat(100 * 1024);
+		const longUserText = "u".repeat(20 * 1024);
+		const lines: string[] = [
+			JSON.stringify({ type: "session", id: "sid-big", cwd: "C:/proj", timestamp: "2026-11-15T00:00:00.000Z" }),
+		];
+		let parentId: string | null = null;
+		const ids: string[] = [];
+		for (let i = 0; i < 90; i++) {
+			const id = `m${i}`;
+			ids.push(id);
+			const message =
+				i % 2 === 0
+					? { role: "user", content: `请处理第 ${i} 步：${longUserText}`, timestamp: 1_760_000_000_000 + i }
+					: {
+							role: "toolResult",
+							toolCallId: `call_${i}`,
+							content: [{ type: "text", text: big }],
+							timestamp: 1_760_000_000_000 + i,
+						};
+			lines.push(JSON.stringify({ type: "message", id, parentId, timestamp: message.timestamp, message }));
+			parentId = id;
+		}
+		const raw = `${lines.join("\n")}\n`;
+		expect(raw.length).toBeGreaterThan(4 * 1024 * 1024);
+
+		// 阶梯瘦身足以达标时：不折叠任何消息（elidedLines === 0）
+		const ladderOnly = compactJsonlToTarget(raw, "__PI_CHAT_PROJECT__:p", 4 * 1024 * 1024);
+		expect(ladderOnly?.sessionId).toBe("sid-big");
+		expect(ladderOnly!.jsonl.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+		expect(ladderOnly!.elidedLines).toBe(0);
+		expect(ladderOnly!.jsonl).toContain("同步瘦身已省略");
+
+		// 目标压到 200KB：必须折叠最旧消息，且 id/parentId 链表保持完整
+		const target = 200 * 1024;
+		const squeezed = compactJsonlToTarget(raw, "__PI_CHAT_PROJECT__:p", target);
+		expect(squeezed!.jsonl.length).toBeLessThanOrEqual(target);
+		expect(squeezed!.elidedLines).toBeGreaterThan(0);
+		expect(squeezed!.jsonl).toContain(ELIDED_CONTENT_MARKER);
+		const outLines = squeezed!.jsonl.trim().split("\n");
+		const header = JSON.parse(outLines[0]!);
+		expect(header.type).toBe("session");
+		expect(header.cwd).toBe("__PI_CHAT_PROJECT__:p");
+		const outIds = outLines.slice(1).map((line) => JSON.parse(line));
+		expect(outIds.map((o) => o.id)).toEqual(ids); // 消息一条不丢
+		for (let i = 0; i < outIds.length; i++) {
+			expect(outIds[i].parentId).toBe(i === 0 ? null : ids[i - 1]); // 链表不断裂
+		}
+		// 折叠的是最旧的那批；最后一条仍保留原正文
+		expect(JSON.stringify(outIds[0].message.content)).toContain(ELIDED_CONTENT_MARKER);
+		expect(JSON.stringify(outIds.at(-1)!.message.content)).not.toContain(ELIDED_CONTENT_MARKER);
+	});
+
+	it("折叠函数幂等：已经折叠过的行不再重复处理", () => {
+		const lines = [
+			JSON.stringify({ type: "session", id: "s", cwd: "c" }),
+			JSON.stringify({
+				type: "message",
+				id: "m0",
+				parentId: null,
+				message: { role: "assistant", content: [{ type: "text", text: "y".repeat(500) }] },
+			}),
+		];
+		const once = elideOldestMessageContents(`${lines.join("\n")}\n`, 100);
+		expect(once.elidedLines).toBe(1);
+		const twice = elideOldestMessageContents(once.jsonl, 100);
+		expect(twice.elidedLines).toBe(0);
+		expect(twice.jsonl).toBe(once.jsonl);
 	});
 
 	it("auto-extracts user hardware, background, and goals from chat messages", () => {
