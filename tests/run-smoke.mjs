@@ -76,6 +76,8 @@ const ALL = [
 	"fork-assistant-bubble-test",
 	"dsh-smoke-test",
 	"dsh-stats-test",
+	// Antigravity（agy acp）平级内核：ready.engine / Gemini-only 模型目录 / 零重启热切（agy 未装则 SKIP）。
+	"agy-smoke-test",
 	"fetch-models-test",
 	"global-search-test",
 	"goal-prefs-test",

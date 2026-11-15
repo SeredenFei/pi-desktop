@@ -684,7 +684,7 @@ export interface AgentEngineCapabilities {
 /**
  * 支持的智能体底座引擎标识。
  */
-export type EngineId = "pi" | "dsh" | "codex" | "claude" | "durable";
+export type EngineId = "pi" | "dsh" | "codex" | "claude" | "durable" | "agy";
 
 /**
  * 引擎状态元数据：描述该引擎在宿主系统中的安装就绪状态。

@@ -737,9 +737,9 @@ export interface ClientState {
 	 *  English default, issue #91) for tool return values / AI prompts.
 	 *  Missing = never reported → English. */
 	locale?: string;
-	/** 客户端当前激活的智能体引擎（"pi" | "dsh" | "codex" | "claude" | "durable"，按标签页 clientId 独立记忆，刷新后保持）。 */
+	/** 客户端当前激活的智能体引擎（"pi" | "dsh" | "codex" | "claude" | "durable" | "agy"，按标签页 clientId 独立记忆，刷新后保持）。 */
 	engine?: EngineId;
-	/** 全局默认智能体引擎（"pi" | "dsh" | "codex" | "claude" | "durable"，存于 __settings__ 下，新标签页与重启后默认跟随）。 */
+	/** 全局默认智能体引擎（"pi" | "dsh" | "codex" | "claude" | "durable" | "agy"，存于 __settings__ 下，新标签页与重启后默认跟随）。 */
 	defaultEngine?: EngineId;
 	/** 客户端最近活跃时间（epoch ms）。服务端在 per-client 写路径上打点（内存态，
 	 *  随任意后续 save 落盘）；旧存档缺省时按 max(projects[].lastUsed, interrupted[].at)

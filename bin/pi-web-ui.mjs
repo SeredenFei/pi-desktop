@@ -121,7 +121,7 @@ server 选项:
   --port <n>        端口（默认 8787，或 $PI_WEB_PORT）
   --cwd <dir>       工作目录（默认 $PI_WEB_CWD 或用户主目录；前台启动默认当前目录）
   --data-dir <dir>  会话数据目录（默认 <cwd>/.pi-web）
-  --engine <pi|dsh|claude|codex|durable> 智能体引擎（默认 $PI_WEB_ENGINE 或 pi）
+  --engine <pi|dsh|claude|codex|durable|agy> 智能体引擎（默认 $PI_WEB_ENGINE 或 pi）
   --host <addr>     监听地址（默认 $PI_WEB_HOST 或 127.0.0.1；0.0.0.0 供局域网/容器）
   --agent-dir <dir> pi 配置目录（默认 $PI_CODING_AGENT_DIR 或 ~/.pi/agent）
   --name <name>     服务名（默认 pi-web-ui；仅限字母/数字/-/_，字母或数字开头，
@@ -187,7 +187,7 @@ Server options:
   --port <n>        Port (default 8787, or $PI_WEB_PORT)
   --cwd <dir>       Working directory (default $PI_WEB_CWD or home dir; foreground uses current dir)
   --data-dir <dir>  Session data directory (default <cwd>/.pi-web)
-  --engine <pi|dsh|claude|codex|durable> Agent engine (default $PI_WEB_ENGINE or pi)
+  --engine <pi|dsh|claude|codex|durable|agy> Agent engine (default $PI_WEB_ENGINE or pi)
   --host <addr>     Listen address (default $PI_WEB_HOST or 127.0.0.1; 0.0.0.0 for LAN/containers)
   --agent-dir <dir> pi config directory (default $PI_CODING_AGENT_DIR or ~/.pi/agent)
   --name <name>     Service name (default pi-web-ui; alphanumeric, "-" and "_" only,
@@ -466,11 +466,11 @@ async function startForeground(opts) {
 	if (opts.cwd) process.env.PI_WEB_CWD = resolve(opts.cwd);
 	if (opts.dataDir) process.env.PI_WEB_DATA_DIR = resolve(opts.dataDir);
 	if (opts.engine) {
-		if (!["pi", "dsh", "claude", "codex", "durable"].includes(opts.engine))
+		if (!["pi", "dsh", "claude", "codex", "durable", "agy"].includes(opts.engine))
 			fail(
 				ZH
-					? `无效引擎: ${opts.engine}（仅支持 pi / dsh / claude / codex / durable）`
-					: `Invalid engine: ${opts.engine} (pi, dsh, claude, codex, durable only)`,
+					? `无效引擎: ${opts.engine}（仅支持 pi / dsh / claude / codex / durable / agy）`
+					: `Invalid engine: ${opts.engine} (pi, dsh, claude, codex, durable, agy only)`,
 			);
 		process.env.PI_WEB_ENGINE = opts.engine;
 	}
@@ -1311,11 +1311,11 @@ function serviceOptions(opts) {
 	}
 	// 引擎/监听地址/agent 配置目录：flag 优先，环境变量后备（token 不走命令行，仅环境变量）。
 	const engine = opts.engine ?? process.env.PI_WEB_ENGINE ?? "pi";
-	if (!["pi", "dsh", "claude", "codex", "durable"].includes(engine))
+	if (!["pi", "dsh", "claude", "codex", "durable", "agy"].includes(engine))
 		fail(
 			ZH
-				? `无效引擎: ${engine}（仅支持 pi / dsh / claude / codex / durable）`
-				: `Invalid engine: ${engine} (pi, dsh, claude, codex, durable only)`,
+				? `无效引擎: ${engine}（仅支持 pi / dsh / claude / codex / durable / agy）`
+				: `Invalid engine: ${engine} (pi, dsh, claude, codex, durable, agy only)`,
 		);
 	const host = opts.host ?? process.env.PI_WEB_HOST;
 	const agentDir = opts.agentDir ? resolve(opts.agentDir) : process.env.PI_CODING_AGENT_DIR;

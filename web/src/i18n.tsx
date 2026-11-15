@@ -169,8 +169,12 @@ export const zh = {
 	settingsEngineCodexDesc: "OpenAI 官方编码智能体，使用本机 Codex CLI 登录与配置",
 	settingsEngineDurableTitle: "DURABLE",
 	settingsEngineDurableDesc: "基于事件溯源与事务化持久化（SQLite/WAL）的长任务自愈执行引擎，支持原生任务图与插话纠错",
+	settingsEngineAgyTitle: "ANTIGRAVITY",
+	settingsEngineAgyDesc:
+		"官方 Antigravity CLI（agy acp）作为平级内核：对话与文件读写由 CLI 自身执行，工具放行经 ACP 权限请求在界面点击确认；仅提供 Gemini 系列模型",
 	engineTagUniversal: "通用驱动 · Claude",
 	engineTagDurable: "持久自愈 · Durable",
+	engineTagAgy: "官方 ACP · Antigravity",
 	engineNotInstalled: "未安装",
 	engineInstall: "安装",
 	engineInstallTip: "未检测到该引擎的全局安装包，安装后即可切换",
@@ -2956,8 +2960,12 @@ export const en: Record<keyof typeof zh, string> = {
 	settingsEngineDurableTitle: "DURABLE",
 	settingsEngineDurableDesc:
 		"Event-sourced and transactional durable execution engine (SQLite/WAL) with crash-resilience, native task graphs, and mid-run steering",
+	settingsEngineAgyTitle: "ANTIGRAVITY",
+	settingsEngineAgyDesc:
+		"Official Antigravity CLI (agy acp) as a peer engine: the CLI runs the loop and file I/O itself, tool approvals arrive as ACP permission requests you confirm in the UI; Gemini models only",
 	engineTagUniversal: "Universal Driver · Claude",
 	engineTagDurable: "Crash-Resilient · Durable",
+	engineTagAgy: "Official ACP · Antigravity",
 	engineNotInstalled: "Not installed",
 	engineInstall: "Install",
 	engineInstallTip: "Global package not found for this engine; install it to switch",

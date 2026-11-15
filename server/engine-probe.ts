@@ -48,6 +48,12 @@ export const ENGINE_PACKAGES: Record<string, EnginePackageMeta> = {
 		packageName: "@earendil-works/pi-durable",
 		installCommand: "npm i -g @earendil-works/pi-durable",
 	},
+	agy: {
+		// agy 是官方原生二进制（非 npm 包）：packageName 仅作展示，安装指引走官方 CLI 安装器
+		id: "agy",
+		packageName: "antigravity-cli (agy)",
+		installCommand: "curl -fsSL https://antigravity.google/install.sh | sh # 或从官方渠道安装 Antigravity CLI",
+	},
 };
 
 /** 探针缓存 TTL：5 秒（短时多次连接或 UI 打开时免除重复频繁执行进程调用） */
@@ -115,6 +121,15 @@ const engineRegistry = new Map<string, EngineEntry>([
 			uninstalling: false,
 		},
 	],
+	[
+		"agy",
+		{
+			status: { id: "agy", installed: false, packageName: ENGINE_PACKAGES.agy.packageName },
+			probedAt: 0,
+			updating: false,
+			uninstalling: false,
+		},
+	],
 ]);
 
 function toPublicStatus(entry: EngineEntry): EngineStatus {
@@ -148,6 +163,10 @@ export async function checkPackageLatest(packageName: string, force = false): Pr
  */
 export async function enrichWithUpdateInfo(status: EngineStatus, force = false): Promise<EngineStatus> {
 	if (!status.installed || !status.packageName || !status.version) {
+		return status;
+	}
+	if (status.id === "agy") {
+		// agy 不在 npm 上：官方安装器自管版本，跳过 registry 查询（避免误报「可更新」）
 		return status;
 	}
 	try {
@@ -338,6 +357,42 @@ export async function probeDurable(force = false): Promise<EngineStatus> {
 }
 
 /**
+ * 探测 Antigravity CLI（agy）是否可用。
+ * agy 是官方原生二进制（非 npm 包），因此只做 `agy --version` 探针：
+ * 版本解析失败也算「已安装」，只是缺版本号（UI 会显示「已安装」）。
+ *
+ * ⚠️ 只为「能不能切到 agy 内核」服务，不做任何额度/凭证探测（红线 5）。
+ */
+export async function probeAgy(): Promise<EngineStatus> {
+	const pkgName = ENGINE_PACKAGES.agy.packageName;
+	const run = (command: string) =>
+		new Promise<{ ok: boolean; version?: string }>((resolve) => {
+			execFile(command, ["--version"], { timeout: 5000, windowsHide: true, maxBuffer: 8192 }, (err, stdout) => {
+				if (err) return resolve({ ok: false });
+				const version = /(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
+				resolve({ ok: true, version });
+			});
+		});
+	let res = await run("agy");
+	if (!res.ok) {
+		// Windows 上官方安装器常写 agy.cmd；用 shell 再试一次（不涉及任何参数拼接）
+		res = await new Promise((resolve) => {
+			execFile(
+				"agy",
+				["--version"],
+				{ timeout: 5000, shell: true, windowsHide: true, maxBuffer: 8192 },
+				(err, stdout) => {
+					if (err) return resolve({ ok: false });
+					const version = /(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
+					resolve({ ok: true, version });
+				},
+			);
+		});
+	}
+	return { id: "agy", installed: res.ok, version: res.version, packageName: pkgName };
+}
+
+/**
  * 按引擎 ID 单独探测状态。
  */
 export async function probeEngine(id: string, force = false): Promise<EngineStatus> {
@@ -361,6 +416,8 @@ export async function probeEngine(id: string, force = false): Promise<EngineStat
 		};
 	} else if (id === "durable") {
 		result = await probeDurable(force);
+	} else if (id === "agy") {
+		result = await probeAgy();
 	} else {
 		result = { id: id as any, installed: false };
 	}
@@ -385,7 +442,7 @@ export async function probeAllEngines(force = false): Promise<EngineStatus[]> {
 	if (!force && allFresh && entries.length > 0) {
 		return entries.map(toPublicStatus);
 	}
-	const [pi, dsh, claude, durable, codex] = await Promise.all([
+	const [pi, dsh, claude, durable, codex, agy] = await Promise.all([
 		probePi(),
 		probeDsh(force),
 		probeClaude(force),
@@ -396,6 +453,7 @@ export async function probeAllEngines(force = false): Promise<EngineStatus[]> {
 			version: probe.version,
 			packageName: ENGINE_PACKAGES.codex.packageName,
 		})),
+		probeAgy(),
 	]);
 	await Promise.all([
 		enrichWithUpdateInfo(pi, force),
@@ -403,9 +461,10 @@ export async function probeAllEngines(force = false): Promise<EngineStatus[]> {
 		enrichWithUpdateInfo(claude, force),
 		enrichWithUpdateInfo(durable, force),
 		enrichWithUpdateInfo(codex, force),
+		enrichWithUpdateInfo(agy, force),
 	]);
 	const timestamp = Date.now();
-	const results = [pi, dsh, claude, durable, codex];
+	const results = [pi, dsh, claude, durable, codex, agy];
 	for (const res of results) {
 		const existing = engineRegistry.get(res.id);
 		engineRegistry.set(res.id, {
@@ -448,6 +507,9 @@ export async function uninstallEngineBackground(
 ): Promise<{ ok: boolean; error?: string; output?: string }> {
 	if (engineId === "pi") {
 		return { ok: false, error: "Pi 为内置核心引擎，不支持卸载" };
+	}
+	if (engineId === "agy") {
+		return { ok: false, error: "Antigravity CLI 为官方原生二进制，请用官方安装器卸载" };
 	}
 	const meta = ENGINE_PACKAGES[engineId];
 	if (!meta || !meta.packageName) {
@@ -547,6 +609,10 @@ export async function updateEngineBackground(
 	engineId: string,
 	options?: { timeoutMs?: number },
 ): Promise<{ ok: boolean; error?: string; output?: string }> {
+	if (engineId === "agy") {
+		// agy 由官方安装器自管版本，宿主不代替它升级/卸载
+		return { ok: false, error: "Antigravity CLI 由官方安装器自管版本，请在终端自行升级" };
+	}
 	const meta = ENGINE_PACKAGES[engineId];
 	if (!meta || !meta.packageName) {
 		return { ok: false, error: `不支持或未知的引擎「${engineId}」` };

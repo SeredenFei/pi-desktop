@@ -16,18 +16,20 @@ export interface EngineMeta {
 		| "settingsEngineDshTitle"
 		| "settingsEngineClaudeTitle"
 		| "settingsEngineCodexTitle"
-		| "settingsEngineDurableTitle";
+		| "settingsEngineDurableTitle"
+		| "settingsEngineAgyTitle";
 	/** 简短徽标标签 */
 	badge: string;
 	/** 特色定位标签（如「完整生态」「极速补丁」「通用驱动」「持久自愈」） */
-	tagKey: "engineTagFull" | "engineTagFast" | "engineTagUniversal" | "engineTagDurable";
+	tagKey: "engineTagFull" | "engineTagFast" | "engineTagUniversal" | "engineTagDurable" | "engineTagAgy";
 	/** 描述说明翻译键 */
 	descKey:
 		| "settingsEnginePiDesc"
 		| "settingsEngineDshDesc"
 		| "settingsEngineClaudeDesc"
 		| "settingsEngineCodexDesc"
-		| "settingsEngineDurableDesc";
+		| "settingsEngineDurableDesc"
+		| "settingsEngineAgyDesc";
 	/** 样式色彩类 */
 	colorClass: string;
 	/** 对应的全局 npm 包名（如 "@deepseek-ai/dsh"） */
@@ -80,6 +82,16 @@ export const SUPPORTED_ENGINES: EngineMeta[] = [
 		colorClass: "engine-codex",
 		packageName: "@openai/codex",
 		installCommand: "npm i -g @openai/codex",
+	},
+	{
+		id: "agy",
+		titleKey: "settingsEngineAgyTitle",
+		badge: "AGY",
+		tagKey: "engineTagAgy",
+		descKey: "settingsEngineAgyDesc",
+		colorClass: "engine-agy",
+		// 官方原生二进制（非 npm 包）：安装走官方安装器，本页面只做检测与切换
+		packageName: "antigravity-cli (agy)",
 	},
 	{
 		id: "durable",

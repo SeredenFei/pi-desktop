@@ -89,6 +89,30 @@ export const DEFAULT_DURABLE_CAPABILITIES: Readonly<AgentEngineCapabilities> = O
 	ephemeralChat: true,
 });
 
+/**
+ * Antigravity（agy acp）引擎能力：官方 Agent 进程自带对话循环与工具执行，
+ * 宿主只做标准 ACP 客户端（工具放行必须人工点击），因此不声明树分叉/计划模式等宿主深水区特性。
+ */
+export const DEFAULT_AGY_CAPABILITIES: Readonly<AgentEngineCapabilities> = Object.freeze({
+	remoteSsh: false,
+	sandboxes: false,
+	workspaceRoots: false,
+	conversationRef: false,
+	pageRef: false,
+	presentFiles: false,
+	planMode: false,
+	delegateMode: false,
+	// 不把 agy 自带的 team/swarm 编排包装成宿主子代理调度
+	subagents: false,
+	toolPromptOverride: false,
+	lazyTools: false,
+	softCap: false,
+	treeFork: false,
+	messageEdit: false,
+	steer: false,
+	ephemeralChat: true,
+});
+
 /** 合并并归一化能力声明（默认回落到通用基座保守值） */
 export function resolveEngineCapabilities(
 	caps?: Partial<AgentEngineCapabilities> | null,

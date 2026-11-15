@@ -31,6 +31,7 @@ import type {
 	UiModelConfigEntry,
 	WorktreeInfo,
 	SlashCommandInfo,
+	UiToolApproval,
 } from "../protocol.js";
 import { FilesService } from "../files-service.js";
 import { uploadLimitBytes } from "../payload-limits.js";
@@ -40,7 +41,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { BgServerTracker } from "../bg-servers.js";
 import { ModelAdminService } from "../model-admin.js";
 import { WebUIContext } from "../webui-context.js";
-import type { BaseAgentDriver, AgentEventSink, AgentTurnMeta } from "./driver-base.js";
+import type { BaseAgentDriver, AgentEventSink, AgentPermissionRequest, AgentTurnMeta } from "./driver-base.js";
 import { ClaudeCodeDriver, probeClaudeCode } from "./drivers/claude-code.js";
 import { CodexDriver, probeCodex } from "./drivers/codex.js";
 import type { UniversalSessionStore } from "./session-store.js";
@@ -162,6 +163,16 @@ export class UniversalSession implements DispatchSession {
 	private deltaSeq = 0;
 	private snapshotTimer: NodeJS.Timeout | null = null;
 	private pendingToolResults: UiMessage[] = [];
+	/** 工具放行审批（ACP 引擎）：id → 待回填的 resolve + 快照用的 UI 形状。 */
+	private readonly pendingApprovals = new Map<
+		string,
+		{
+			conversationId: string;
+			resolve: (result: { decision: "approve" | "deny"; editedParams?: unknown; reason?: string }) => void;
+			timer?: NodeJS.Timeout;
+		}
+	>();
+	private readonly pendingApprovalUi = new Map<string, UiToolApproval>();
 	private readonly sessionDrafts = new Map<string, { text: string; ts: number }>();
 	private followUpQueue: QueuedMessageEntry[] = [];
 
@@ -704,6 +715,8 @@ export class UniversalSession implements DispatchSession {
 			tools: [],
 			version: this.version,
 			engineCapabilities: this.driver.getEngineCapabilities?.() ?? DEFAULT_UNIVERSAL_CAPABILITIES,
+			// 刷新/重连后仍能把待审批弹窗拿回来（工具放行不会因为刷新而静默通过）
+			pendingApproval: [...this.pendingApprovalUi.values()].find((item) => item.conversationId === conv.id) ?? null,
 			sandbox: this.sandboxes.getByCwd(this.cwd) ?? null,
 			worktree: this.worktreeInfo,
 			workspaceRoots: this.stateStore?.getWorkspaceRoots(this.clientId, this.cwd) ?? [],
@@ -971,6 +984,8 @@ export class UniversalSession implements DispatchSession {
 					this.emitNotice("error", `执行出错: ${errText}`, `Execution error: ${errText}`);
 					this.finalizeTurn();
 				},
+				// ACP / 第三方 Agent 的工具放行：弹到界面由人点击（绝不静默放行）
+				onPermissionRequest: (request) => this.requestToolApproval(request),
 			};
 
 			try {
@@ -978,7 +993,10 @@ export class UniversalSession implements DispatchSession {
 					get:
 						(target, key: keyof AgentEventSink) =>
 						(...args: unknown[]) => {
-							if (isCurrent()) (target[key] as (...args: unknown[]) => void)?.(...args);
+							if (!isCurrent()) return undefined;
+							// 透传返回值：onPermissionRequest 等异步槽靠 Promise 拿审批结论，
+							// 丢掉返回值会被驱动当作「用户拒绝」。
+							return (target[key] as (...args: unknown[]) => unknown)?.(...args);
 						},
 				});
 				await this.driver.sendPrompt(
@@ -997,6 +1015,80 @@ export class UniversalSession implements DispatchSession {
 			this.finalizeTurn();
 			this.emitNotice("error", String(err), String(err));
 		}
+	}
+
+	/**
+	 * 工具放行请求（ACP `session/request_permission`）：发一条 `tool_approval_pending`
+	 * 到前端弹窗，等用户点「允许/拒绝」。超时（默认 5 分钟）或无人应答 → 拒绝。
+	 *
+	 * 绝不返回「自动放行」：这是 agy 内核的头号防封红线。
+	 */
+	private requestToolApproval(request: AgentPermissionRequest, timeoutMs = 5 * 60_000) {
+		const id = `appr-${Date.now()}-${randomUUID().slice(0, 6)}`;
+		const convId = this.activeConvId;
+		const toolCallId = request.toolCallId;
+		const allow =
+			request.options.find((option) => option.kind === "allow_once") ??
+			request.options.find((option) => typeof option.kind === "string" && option.kind.startsWith("allow"));
+		const reject =
+			request.options.find((option) => option.kind === "reject_once") ??
+			request.options.find((option) => typeof option.kind === "string" && option.kind.startsWith("reject"));
+		const ui: UiToolApproval = {
+			id,
+			conversationId: convId,
+			toolCallId,
+			toolName: request.toolName,
+			params: request.params,
+			reason: request.title ? `Antigravity 请求执行：${request.title}` : "Antigravity 请求执行受控动作",
+			reasonEn: request.title ? `Antigravity requests: ${request.title}` : "Antigravity requests a guarded action",
+			createdAt: Date.now(),
+		};
+		this.pendingApprovalUi.set(id, ui);
+		this.send({ type: "tool_approval_pending", ...ui });
+		return new Promise<{ optionId: string | null; reason?: string }>((resolve) => {
+			const finish = (decision: "approve" | "deny", reason?: string) => {
+				const entry = this.pendingApprovals.get(id);
+				if (!entry) return;
+				if (entry.timer) clearTimeout(entry.timer);
+				this.pendingApprovals.delete(id);
+				this.pendingApprovalUi.delete(id);
+				this.send({ type: "tool_approval_resolved", id });
+				this.flushSnapshot();
+				resolve({
+					optionId: decision === "approve" ? (allow?.optionId ?? null) : (reject?.optionId ?? null),
+					reason,
+				});
+			};
+			const timer = setTimeout(() => finish("deny", "审核超时，已拒绝"), timeoutMs);
+			timer.unref?.();
+			this.pendingApprovals.set(id, {
+				conversationId: convId,
+				timer,
+				resolve: (result) => finish(result.decision, result.reason),
+			});
+			this.flushSnapshot();
+		});
+	}
+
+	/** 前端审批回包（`tool_approval_response`）。 */
+	resolveToolApproval(
+		id: string,
+		decision: "approve" | "deny" | "edit",
+		editedParams?: unknown,
+		reason?: string,
+	): boolean {
+		const entry = this.pendingApprovals.get(id);
+		if (!entry) return false;
+		if (decision === "edit") {
+			// ACP 权限请求不支持就地改写参数：按「允许」放行原始参数，并明确告知用户
+			this.emitNotice(
+				"warning",
+				"Antigravity 的 ACP 权限请求不支持就地改参数，已按原参数放行",
+				"ACP permission requests cannot be re-parameterized; approved with the original arguments",
+			);
+		}
+		entry.resolve({ decision: decision === "deny" ? "deny" : "approve", editedParams, reason });
+		return true;
 	}
 
 	private updateStreamingContent(): void {

@@ -8294,6 +8294,10 @@
 		color: #fff;
 		background: linear-gradient(135deg, #059669, #0d9488);
 	}
+	.engine-badge.engine-agy {
+		color: #fff;
+		background: linear-gradient(135deg, #2563eb, #7c3aed);
+	}
 
 	/* 引擎选择器（EnginePicker：顶栏/底栏常驻显式切换胶囊，支持任意多引擎扩展） */
 	.engine-picker-wrap {
@@ -8339,6 +8343,10 @@
 	.engine-picker-btn.engine-durable .engine-picker-icon,
 	.engine-picker-wrap.engine-durable .engine-picker-icon {
 		color: #10b981;
+	}
+	.engine-picker-btn.engine-agy .engine-picker-icon,
+	.engine-picker-wrap.engine-agy .engine-picker-icon {
+		color: #6366f1;
 	}
 	.engine-picker-name {
 		font-size: 12px;
@@ -8429,6 +8437,10 @@
 	.footer .engine-picker-btn.engine-durable .engine-picker-icon {
 		color: #10b981;
 	}
+	.statusbar .engine-picker-btn.engine-agy .engine-picker-icon,
+	.footer .engine-picker-btn.engine-agy .engine-picker-icon {
+		color: #818cf8;
+	}
 	.engine-picker-menu {
 		min-width: 290px;
 		max-width: 340px;
@@ -8512,6 +8524,9 @@
 	}
 	.engine-picker-item.engine-durable .engine-picker-item-icon {
 		color: #10b981;
+	}
+	.engine-picker-item.engine-agy .engine-picker-item-icon {
+		color: #6366f1;
 	}
 	.engine-picker-item-tag {
 		font-size: 10px;

@@ -38,6 +38,7 @@
 | [`root-cause-boundaries.md`](root-cause-boundaries.md)           | 根因整改边界：稳定归属、取消代次、持久提交与安全清理、工作树清理、HTTP 传输                         | 动异步/归属/清理/网络请求            |
 | [`goal-conversation-design.md`](goal-conversation-design.md)     | 目标模式 2.0 设计：执行对话 + 审查者主对话、服务端轮次与熔断、证据注入                              | 动目标模式、审查循环                 |
 | [`dsh-engine.md`](dsh-engine.md)                                 | DSH 双引擎：四预设 file: 克隆隔离、问卷与技能钩子挂 agent scope、底栏统计吃直播帧                   | 动 DSH 预设 / 问卷 / 统计            |
+| [`agy-acp-engine.md`](agy-acp-engine.md)                         | Antigravity 平级内核：agy acp 实测协议面、五条防封红线、技能软链/MCP、内核级环境隔离与跨内核清洗    | 动 agy 内核、ACP 权限桥、模型过滤    |
 | [`preset-sharing.md`](preset-sharing.md)                         | 预设导入导出：白名单净化、dryRun、一键分享、社区目录与 gh 回落                                      | 动设置预设、分享流程                 |
 | [`device-center.md`](device-center.md)                           | 设备中心：Hub 与连接器、绑定配对、群聊、单端口 `/device/<id>/` 与 CSP sandbox                       | 动设备中心服务端                     |
 | [`device-collaboration.md`](device-collaboration.md)             | 群组 / Bot / 跨设备协作硬约束：任务派发、Bot registry lease、并发调度、任务恢复、交付审查、远程桌面 | 动群任务、Bot、跨设备协作、交付流    |

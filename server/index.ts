@@ -635,9 +635,11 @@ let currentDefaultEngine: EngineId =
 				? "claude"
 				: EXPLICIT_ENGINE_ARG === "dsh"
 					? "dsh"
-					: EXPLICIT_ENGINE_ARG === "pi"
-						? "pi"
-						: (sharedStateStore.getDefaultEngine() ?? "pi");
+					: EXPLICIT_ENGINE_ARG === "agy"
+						? "agy"
+						: EXPLICIT_ENGINE_ARG === "pi"
+							? "pi"
+							: (sharedStateStore.getDefaultEngine() ?? "pi");
 /** 默认引擎标识（兼容 /api/health 等读取）。 */
 /** 每个客户端（浏览器标签页 clientId）当前激活的引擎。支持多标签页同时跑不同引擎 + 零重启热切。 */
 const clientEngines = new Map<string, EngineId>();
@@ -1664,7 +1666,13 @@ heartbeatTimer.unref?.();
 // PI_WEB_ENGINE=durable 时使用 Pi Durable 引擎（server/durable/），
 // 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
 import { DshAgentService } from "./dsh/dsh-agent-service.js";
-import { UniversalAgentService, ClaudeCodeDriver, probeClaudeCode, CodexDriver } from "./universal/index.js";
+import {
+	UniversalAgentService,
+	ClaudeCodeDriver,
+	probeClaudeCode,
+	CodexDriver,
+	AgyAcpDriver,
+} from "./universal/index.js";
 import { DurableAgentService } from "./durable/index.js";
 import {
 	probeAllEngines,
@@ -2143,6 +2151,7 @@ let dshServiceInstance: DshAgentService | null = null;
 let claudeServiceInstance: UniversalAgentService | null = null;
 let codexServiceInstance: UniversalAgentService | null = null;
 let durableServiceInstance: DurableAgentService | null = null;
+let agyServiceInstance: UniversalAgentService | null = null;
 let wireEngineHooks: ((svc: EngineService) => void) | null = null;
 let sharedSocketCount = 0;
 let sharedQuiesced = false;
@@ -2154,6 +2163,7 @@ function activeEngines(): EngineService[] {
 	if (claudeServiceInstance) list.push(claudeServiceInstance);
 	if (codexServiceInstance) list.push(codexServiceInstance);
 	if (durableServiceInstance) list.push(durableServiceInstance);
+	if (agyServiceInstance) list.push(agyServiceInstance);
 	return list;
 }
 
@@ -2211,6 +2221,25 @@ function ensureEngine(engine: EngineId): EngineService {
 			wireEngineHooks?.(dshServiceInstance);
 		}
 		return dshServiceInstance;
+	}
+	if (engine === "agy") {
+		if (!agyServiceInstance) {
+			agyServiceInstance = new UniversalAgentService({
+				cwd: CWD,
+				dataDir: DATA_DIR,
+				agentDir: getAgentDir(),
+				stateStore: sharedStateStore,
+				engine: "agy",
+				driverFactory: (cwd) =>
+					new AgyAcpDriver(cwd, {
+						log: process.env.PI_WEB_AGY_DEBUG === "1" ? (line) => process.stderr.write(`${line}\n`) : undefined,
+					}),
+			});
+			for (let i = 0; i < sharedSocketCount; i++) agyServiceInstance.noteSocketOpen();
+			if (sharedQuiesced) agyServiceInstance.quiesce();
+			wireEngineHooks?.(agyServiceInstance);
+		}
+		return agyServiceInstance;
 	}
 	if (!piServiceInstance) {
 		piServiceInstance = new AgentService(CWD, sharedStateStore);
@@ -3218,15 +3247,17 @@ wss.on("connection", (ws) => {
 						? "claude"
 						: msg.engine === "dsh"
 							? "dsh"
-							: msg.engine === "pi"
-								? "pi"
-								: null;
+							: msg.engine === "agy"
+								? "agy"
+								: msg.engine === "pi"
+									? "pi"
+									: null;
 		if (!targetEngine) {
 			send({
 				type: "notice",
 				level: "error",
-				text: `无效的引擎类型：${String(msg.engine)}（仅支持 pi / dsh / codex / claude / durable）`,
-				textEn: `Invalid engine "${String(msg.engine)}" (supported: pi, dsh, codex, claude, durable)`,
+				text: `无效的引擎类型：${String(msg.engine)}（仅支持 pi / dsh / codex / claude / durable / agy）`,
+				textEn: `Invalid engine "${String(msg.engine)}" (supported: pi, dsh, codex, claude, durable, agy)`,
 			});
 			return;
 		}
@@ -3311,6 +3342,12 @@ wss.on("connection", (ws) => {
 							);
 						}
 					});
+				} else if (targetEngine === "agy") {
+					newCs.emitNotice(
+						"info",
+						"已热切换至 Antigravity 内核（官方 agy acp 子进程，对话与文件读写由 CLI 自身执行；工具放行请在弹窗点击确认）",
+						"Switched to the Antigravity engine (official agy acp subprocess; approve tool requests in the dialog)",
+					);
 				} else if (targetEngine === "dsh") {
 					newCs.emitNotice(
 						"info",

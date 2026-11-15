@@ -9,4 +9,5 @@ export { UniversalAgentService, type DriverFactory } from "./universal-service.j
 export { CodexDriver, probeCodex } from "./drivers/codex.js";
 export { MockAgentDriver } from "./drivers/mock-driver.js";
 export { ClaudeCodeDriver, probeClaudeCode, type ClaudeCodeDriverOptions } from "./drivers/claude-code.js";
+export { AgyAcpDriver, type AgyAcpDriverOptions } from "./drivers/agy-acp.js";
 export type { UniversalConversation, ActiveTurnState } from "./universal-types.js";

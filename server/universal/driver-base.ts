@@ -33,6 +33,8 @@ export interface AgentCapabilities {
 	supportsAskUser?: boolean;
 	/** 是否支持子代理生命周期与调度管理（默认为 true，由通用底座统管） */
 	supportsSubagents?: boolean;
+	/** 是否把工具放行请求交给宿主界面审批（true = 必须经人点击，ACP 引擎必选） */
+	supportsPermissionPrompt?: boolean;
 }
 
 /**
@@ -60,6 +62,31 @@ export interface AgentTurnMeta {
 	costUSD?: number;
 	contextTokens?: number;
 	contextWindow?: number;
+}
+
+/**
+ * 一次「工具放行」请求：外部 Agent（如 ACP 的 session/request_permission）要执行
+ * 受控动作，宿主必须弹给用户并等待选择。
+ */
+export interface AgentPermissionRequest {
+	/** 工具调用 id（与 onToolStart 的 callId 对齐）。 */
+	toolCallId: string;
+	/** 工具名（如 Bash / write_file / run_command）。 */
+	toolName: string;
+	/** 人类可读标题（如「File hello.txt」）。 */
+	title?: string;
+	/** 动作类别（read / edit / execute / other）。 */
+	kind?: string;
+	/** 工具入参（展示用）。 */
+	params: Record<string, unknown>;
+	/** 官方下发的可选答复（optionId + kind：allow_once / reject_once ...）。 */
+	options: Array<{ optionId: string; name?: string; kind?: string }>;
+}
+
+/** 用户对放行请求的答复：optionId=null 表示拒绝/取消。 */
+export interface AgentPermissionDecision {
+	optionId: string | null;
+	reason?: string;
 }
 
 /**
@@ -103,6 +130,12 @@ export interface AgentEventSink {
 		question: string,
 		options?: Array<{ id: string; label: string; description?: string }>,
 	): Promise<{ selected: string[]; custom?: string }>;
+
+	/**
+	 * 工具放行请求（人在回路审批）。驱动实现应当：能弹就弹、弹不了就拒绝，
+	 * 绝不在没有用户确认的情况下自动放行（ACP 客户端的红线）。
+	 */
+	onPermissionRequest?(request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
 
 	/**
 	 * 本轮执行结束（助手回答完成）
