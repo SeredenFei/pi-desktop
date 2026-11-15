@@ -13,6 +13,37 @@
 <!-- auto-i18n:start -->
 <!-- auto-i18n:end -->
 
+## [0.117.0] — 2026-11-15
+
+### Highlights
+
+- **Antigravity（agy acp）成为平级可切换内核**：引擎选择器新增 `ANTIGRAVITY`，与 pi / DSH / Claude Code / Codex / Durable 并列，零重启热切（`PI_WEB_ENGINE=agy` 或 `--engine agy`）。与「把 agy 拆成模型接口塞进宿主循环」的插件方案不同，这里是**官方 `agy acp` 子进程做整个内核**：对话循环、文件读写、命令执行全在官方进程内完成，宿主只做标准 ACP 客户端（流式正文/思考、工具卡片、上下文占用），工具放行通过 ACP `session/request_permission` 弹到界面由人点击，绝不自动放行。
+- **五条防封红线全部代码化**：不传 `--dangerously-skip-permissions`（spawn 前断言）、不读 OAuth 凭证（登录走终端 `agy acp --login`）、服务端只暴露 Gemini 系列模型、无后台自动追问、额度只在用户动作时单次查询（`/usage`，禁止轮询）。红线清单与回归测试同源，`agy` 模块出现 `setInterval` 会当场测试失败。
+- **多内核并存不串台**：`agy` 子进程使用白名单环境变量（剥掉 `GEMINI_API_KEY`、`GOOGLE_GEMINI_BASE_URL`、`AGY_ADC_AUTH` 以及别家内核的 `DEEPSEEK_*` / `ANTHROPIC_*` / `OPENAI_*`），官方配置文件只做只读冲突检测；中途换内核时可选把前序历史纯文本接力（剥离 `thinkingSignature` / `encrypted_content` 等推理签名，只传正文）。
+- **记忆同步带上限检测与自动压缩**：单会话同步上限 512KB → **16MB**、源 JSONL 读取上限 10MB → **64MB**、全部会话总预算 **192MB**；瘦身后仍超 **4MB** 的会话在进入同步前自动压到 **2MB**（先逐级收紧工具输出，再折叠最旧消息正文，`parentId` 链保持完整，另一台机器照常能打开）。
+
+### Added
+
+- 引擎 `agy`：`server/agy/`（ACP 客户端 / 线协议类型 / 合规护栏 / 按需配额 / 技能软链与 MCP 配置 / 内核级环境隔离 / 跨内核历史清洗）+ `server/universal/drivers/agy-acp.ts` 驱动 + `DEFAULT_AGY_CAPABILITIES`；`probeAgy()` 只探 `agy --version`，不参与 npm 升级/卸载（官方安装器自管版本）。
+- 通用底座首次支持**工具放行审批**：`AgentEventSink.onPermissionRequest` → `tool_approval_pending` → 界面点击 → `tool_approval_response`；刷新/重连后待审批弹窗可从快照恢复，无应答 5 分钟自动拒绝。
+- 斜杠命令：`/usage`（单次额度查询，零 token）、`/agy-skills`（把既有技能目录软链到 `.agents/skills/`，两个内核读同一份技能规范）、`/agy-mcp`（展示项目 `.agents/mcp_config.json` 与全局 `~/.gemini/config/mcp_config.json`）。
+- 记忆同步：`trimTranscriptsToBudget()`（按新旧保留 + 总量预算）、`compactJsonlToTarget()`（体积检测 + 阶梯压缩）、`elideOldestMessageContents()`（折叠最旧消息正文，幂等）。
+
+### Changed
+
+- 线协议 `PROTOCOL_VERSION` 44 → **45**（新增 `agy` 引擎标识）。
+- `--engine` 帮助与校验文案加入 `agy`；引擎下拉新增 `ANTIGRAVITY` 条目（多语言 + 主题色）。
+- 记忆同步瘦身加强：剔除 `usage` / `details` / `responseId` / `rawStopReason`，`toolResult` 文本与 `toolCall` 参数首尾截断（1200 字符，超 480KB 时收紧到 600），旧端仍拿到 ≤512KB 的兼容版本。
+
+### Fixed
+
+- 修复 ACP 权限请求 id 为字符串（`"1"`）时被当数字丢弃、工具调用永久卡住的问题；回包 id 原样回传。
+- 修复宿主 canonical 模型 id（`agy/gemini-4-carbon`）直接透传给 ACP 的问题：驱动会剥前缀并归一化到族名，切换模型不再报错。
+
+### i18n
+
+- 前端新增 key（3）：`settingsEngineAgyTitle`、`settingsEngineAgyDesc`、`engineTagAgy`
+
 ## [0.116.4-minimal] — 2026-11-12
 
 ### Highlights
@@ -2296,3 +2327,4 @@ when?, children?}`，也收 `topbar` / `settings` 这类简写别名）；宿主
 [0.62.1]: https://github.com/xing-shuyin/pi-web-ui/releases/tag/v0.62.1
 [0.62.0]: https://github.com/xing-shuyin/pi-web-ui/releases/tag/v0.62.0
 [0.61.0]: https://github.com/xing-shuyin/pi-web-ui/releases/tag/v0.61.0
+[0.117.0]: https://github.com/SeredenFei/pi-desktop/releases/tag/v0.117.0
