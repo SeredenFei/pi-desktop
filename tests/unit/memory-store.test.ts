@@ -231,14 +231,14 @@ describe("MemoryStore & cross-device merge", () => {
 		// 阶梯瘦身足以达标时：不折叠任何消息（elidedLines === 0）
 		const ladderOnly = compactJsonlToTarget(raw, "__PI_CHAT_PROJECT__:p", 4 * 1024 * 1024);
 		expect(ladderOnly?.sessionId).toBe("sid-big");
-		expect(ladderOnly!.jsonl.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+		expect(Buffer.byteLength(ladderOnly!.jsonl, "utf8")).toBeLessThanOrEqual(4 * 1024 * 1024);
 		expect(ladderOnly!.elidedLines).toBe(0);
 		expect(ladderOnly!.jsonl).toContain("同步瘦身已省略");
 
 		// 目标压到 200KB：必须折叠最旧消息，且 id/parentId 链表保持完整
 		const target = 200 * 1024;
 		const squeezed = compactJsonlToTarget(raw, "__PI_CHAT_PROJECT__:p", target);
-		expect(squeezed!.jsonl.length).toBeLessThanOrEqual(target);
+		expect(Buffer.byteLength(squeezed!.jsonl, "utf8")).toBeLessThanOrEqual(target);
 		expect(squeezed!.elidedLines).toBeGreaterThan(0);
 		expect(squeezed!.jsonl).toContain(ELIDED_CONTENT_MARKER);
 		const outLines = squeezed!.jsonl.trim().split("\n");

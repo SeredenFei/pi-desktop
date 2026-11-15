@@ -63,7 +63,7 @@ export function trimTranscriptsToBudget(
 	let total = 0;
 	for (const item of sorted) {
 		if (kept.length >= maxCount) break;
-		const size = item.jsonl?.length ?? 0;
+		const size = item.jsonl ? Buffer.byteLength(item.jsonl, "utf8") : 0;
 		if (kept.length > 0 && total + size > maxTotalBytes) break;
 		kept.push(item);
 		total += size;
@@ -329,7 +329,8 @@ export function compactJsonlForSync(
  */
 export function elideOldestMessageContents(jsonl: string, targetBytes: number): { jsonl: string; elidedLines: number } {
 	const lines = jsonl.replace(/\n+$/, "").split("\n");
-	let total = lines.reduce((sum, line) => sum + line.length + 1, 0);
+	const lineBytes = (line: string) => Buffer.byteLength(line, "utf8") + 1;
+	let total = lines.reduce((sum, line) => sum + lineBytes(line), 0);
 	if (total <= targetBytes) return { jsonl, elidedLines: 0 };
 	let elided = 0;
 	for (let i = 0; i < lines.length && total > targetBytes; i++) {
@@ -350,9 +351,9 @@ export function elideOldestMessageContents(jsonl: string, targetBytes: number): 
 		delete nextMsg.thinkingText;
 		const nextLine = JSON.stringify({ ...obj, message: nextMsg });
 		if (nextLine.length >= lines[i]!.length) continue;
-		total -= lines[i]!.length + 1;
+		total -= lineBytes(lines[i]!);
 		lines[i] = nextLine;
-		total += nextLine.length + 1;
+		total += lineBytes(nextLine);
 		elided++;
 	}
 	return { jsonl: `${lines.join("\n")}\n`, elidedLines: elided };
@@ -373,7 +374,7 @@ export function compactJsonlToTarget(
 		const pass = compactJsonlPass(rawLines, targetCwd, limit);
 		if (!pass) return null;
 		last = pass;
-		if (pass.jsonl.length <= targetBytes) return { ...pass, elidedLines: 0 };
+		if (Buffer.byteLength(pass.jsonl, "utf8") <= targetBytes) return { ...pass, elidedLines: 0 };
 	}
 	if (!last) return null;
 	const elided = elideOldestMessageContents(last.jsonl, targetBytes);
@@ -684,7 +685,7 @@ export function mergeMemoryDocuments(local: MemoryDocument, remote: MemoryDocume
 			if (projects[chosen.scopeKey]?.deletedAt) continue;
 			let compacted = compactJsonlForSync(chosen.jsonl);
 			// 体积检测：瘦身后仍超水位 → 再压到目标体积（折叠最旧消息正文，parentId 链保持完整）
-			if (compacted && compacted.jsonl.length > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
+			if (compacted && Buffer.byteLength(compacted.jsonl, "utf8") > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
 				compacted = compactJsonlToTarget(chosen.jsonl, undefined, TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES) ?? compacted;
 			}
 			const cleanJsonl = compacted ? compacted.jsonl : chosen.jsonl;
@@ -964,14 +965,14 @@ export class MemoryStore {
 					const rawText = readFileSync(fp, "utf8");
 					let compacted = compactJsonlForSync(rawText, t.placeholder);
 					// 体积检测：超过水位就先自动压缩（先收紧工具输出，再折叠最旧消息正文）
-					if (compacted && compacted.jsonl.length > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
-						const before = compacted.jsonl.length;
+					if (compacted && Buffer.byteLength(compacted.jsonl, "utf8") > TRANSCRIPT_AUTO_COMPACT_TRIGGER_BYTES) {
+						const before = Buffer.byteLength(compacted.jsonl, "utf8");
 						const shrunk = compactJsonlToTarget(rawText, t.placeholder, TRANSCRIPT_AUTO_COMPACT_TARGET_BYTES);
 						if (shrunk) {
 							compacted = shrunk;
 							console.warn(
 								`[memory] 会话 ${shrunk.sessionId} 瘦身后 ${(before / 1024 / 1024).toFixed(1)}MB，` +
-									`已自动压缩到 ${(shrunk.jsonl.length / 1024 / 1024).toFixed(1)}MB` +
+									`已自动压缩到 ${(Buffer.byteLength(shrunk.jsonl, "utf8") / 1024 / 1024).toFixed(1)}MB` +
 									`（折叠 ${shrunk.elidedLines} 条最旧消息正文）`,
 							);
 						}
